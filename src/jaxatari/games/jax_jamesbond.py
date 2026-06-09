@@ -1,3 +1,10 @@
+"""Runnable JamesBond skeleton environment.
+
+This file intentionally defines only the shared environment contract and minimal
+placeholder behavior. Gameplay systems such as object spawning, collisions,
+scoring, lives, and sprite-accurate rendering are left for follow-up work.
+"""
+
 from functools import partial
 from typing import Tuple
 
@@ -14,6 +21,9 @@ from jaxatari.rendering import jax_rendering_utils as render_utils
 
 
 class JamesBondConstants(struct.PyTreeNode):
+    """Static JamesBond placeholder constants shared by state, spaces, and render."""
+
+    # Atari-style frame dimensions and initial play-area bounds.
     SCREEN_WIDTH: int = struct.field(pytree_node=False, default=160)
     SCREEN_HEIGHT: int = struct.field(pytree_node=False, default=210)
     GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=8) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
@@ -21,28 +31,22 @@ class JamesBondConstants(struct.PyTreeNode):
     GAME_AREA_MIN_Y: int = struct.field(pytree_node=False, default=28) ## Playable Area: 123 (Top-left coordinate system); 87 (Bottom-right co-sys)
     GAME_AREA_MAX_Y: int = struct.field(pytree_node=False, default=196)
 
-    PLAYER_WIDTH: int = struct.field(pytree_node=False, default=8)
-    PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=32) ## 30 if starting from the left
-    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160) ## 120 with top-left coordinate system, and starting from the top
-    PLAYER_IN_AIR_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
-        0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, ## TODO: Remove first zero?
-        0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, ## TODO: Jumps seem random? P.S. They are random
-        0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 
-        0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 
-        0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
-        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1
-    ])
-    PLAYER_SPEED: float = struct.field(pytree_node=False, default=1.0) ## TODO: speed int or float?
+    PLAYER_WIDTH: int = struct.field(pytree_node=False, default=10)
+    PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=32)
+    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160)
+    PLAYER_SPEED: float = struct.field(pytree_node=False, default=2.0)
     GRAVITY: float = struct.field(pytree_node=False, default=0.0)
     JUMP_VELOCITY: float = struct.field(pytree_node=False, default=0.0)
 
+    # Fixed capacities keep object state JAX-friendly for future lifecycle logic.
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
     MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
     MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
+    # Placeholder render/collision sizes for object-centric observations.
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=4)
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=4)
     ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
@@ -50,12 +54,13 @@ class JamesBondConstants(struct.PyTreeNode):
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
 
+    # Reward constants are named now so scoring work can reuse the contract.
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
     REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0)
     REWARD_LOST_LIFE: float = struct.field(pytree_node=False, default=-1.0)
 
-    ACTION_MEANINGS: Tuple[str, ...] = struct.field( ## TODO: What is this for?
+    ACTION_MEANINGS: Tuple[str, ...] = struct.field(
         pytree_node=False,
         default=(
             "NOOP", 
@@ -79,6 +84,7 @@ class JamesBondConstants(struct.PyTreeNode):
             ),
     )
 
+    # Procedural colors keep the skeleton renderable before final sprites land.
     BACKGROUND_COLOR: Tuple[int, int, int] = struct.field(
         pytree_node=False, default=(8, 14, 32)
     )
@@ -101,6 +107,8 @@ class JamesBondConstants(struct.PyTreeNode):
 
 @struct.dataclass
 class JamesBondState:
+    """Full internal state with fixed-size object arrays and active masks."""
+
     player_x: chex.Array
     player_y: chex.Array
     player_vx: chex.Array
@@ -139,6 +147,8 @@ class JamesBondState:
 
 @struct.dataclass
 class JamesBondObservation:
+    """Object-centric observation matching observation_space()."""
+
     player: ObjectObservation
     diamonds: ObjectObservation
     enemies: ObjectObservation
@@ -151,6 +161,8 @@ class JamesBondObservation:
 
 @struct.dataclass
 class JamesBondInfo:
+    """Debug/event info for smoke tests and future gameplay systems."""
+
     collision_happened: jnp.ndarray
     collected_diamond: jnp.ndarray
     hit_enemy: jnp.ndarray
@@ -164,6 +176,8 @@ class JamesBondInfo:
 class JaxJamesBond(
     JaxEnvironment[JamesBondState, JamesBondObservation, JamesBondInfo, JamesBondConstants]
 ):
+    """Minimal runnable JamesBond environment following the JAXAtari API."""
+
     # Compact agent action indices map to these ALE-style actions.
     ACTION_SET: jnp.ndarray = jnp.array(
         [
@@ -198,6 +212,8 @@ class JaxJamesBond(
     def reset(
         self, key: chex.PRNGKey = jax.random.PRNGKey(0)
     ) -> Tuple[JamesBondObservation, JamesBondState]:
+        """Create an empty level state with inactive object slots."""
+
         if key is None:
             key = jax.random.PRNGKey(0)
         state_key, _ = jax.random.split(key)
@@ -243,9 +259,12 @@ class JaxJamesBond(
     def step(
         self, state: JamesBondState, action: chex.Array
     ) -> Tuple[JamesBondObservation, JamesBondState, chex.Array, chex.Array, JamesBondInfo]:
+        """Advance one placeholder frame and return the repo-standard tuple."""
+
         atari_action = self._decode_action(action)
         previous_state = state
 
+        # Clear one-frame event flags before placeholder systems update them.
         state = state.replace(
             step_count=state.step_count + 1,
             collision_happened=jnp.array(False, dtype=jnp.bool_),
@@ -324,6 +343,8 @@ class JaxJamesBond(
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_observation(self, state: JamesBondState) -> JamesBondObservation:
+        """Build the structured object observation from internal state."""
+
         player = ObjectObservation.create(
             x=state.player_x,
             y=state.player_y,
@@ -376,6 +397,8 @@ class JaxJamesBond(
         height: int,
         orientation: chex.Array = None,
     ) -> ObjectObservation:
+        """Convert fixed-size object arrays plus masks into ObjectObservation."""
+
         return ObjectObservation.create(
             x=x,
             y=y,
@@ -399,255 +422,38 @@ class JaxJamesBond(
         )
 
     def _decode_action(self, action: chex.Array) -> chex.Array:
+        """Translate compact action-space indices to JAXAtariAction values."""
+
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
     def _step_player(
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
-        player_x = state.player_x
-        player_y = state.player_y
-        player_jumping = state.player_jumping
-        player_falling = state.player_falling
-        player_fast_falling = state.player_fast_falling
-        player_in_air_step = state.player_in_air_step
+        left = atari_action == Action.LEFT
+        right = atari_action == Action.RIGHT
+        up = atari_action == Action.UP
+        down = atari_action == Action.DOWN
 
-        player_bullet_active = state.player_bullet_active
-        player_bullet_step = state.player_bullet_step
-        player_bullet_x = state.player_bullet_x
-        player_bullet_y = state.player_bullet_y
+        player_vx = (
+            right.astype(jnp.float32) - left.astype(jnp.float32)
+        ) * self.consts.PLAYER_SPEED
+        player_vy = (
+            down.astype(jnp.float32) - up.astype(jnp.float32)
+        ) * self.consts.PLAYER_SPEED
 
-        up_pressed = jnp.any(
-            jnp.array([
-                atari_action == Action.UP,
-                atari_action == Action.UPRIGHT,
-                atari_action == Action.UPLEFT,
-                atari_action == Action.UPFIRE,
-                atari_action == Action.UPRIGHTFIRE,
-                atari_action == Action.UPLEFTFIRE,
-            ])
+        player_x = jnp.clip(
+            state.player_x + player_vx,
+            self.consts.GAME_AREA_MIN_X,
+            self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH,
         )
-
-        right_pressed = jnp.any(
-            jnp.array([
-                atari_action == Action.RIGHT,
-                atari_action == Action.UPRIGHT,
-                atari_action == Action.DOWNRIGHT,
-                atari_action == Action.RIGHTFIRE,
-                atari_action == Action.UPRIGHTFIRE,
-                atari_action == Action.DOWNRIGHTFIRE
-            ])
+        player_y = jnp.clip(
+            state.player_y + player_vy,
+            self.consts.GAME_AREA_MIN_Y,
+            self.consts.GAME_AREA_MAX_Y - self.consts.PLAYER_HEIGHT,
         )
-
-        left_pressed = jnp.any(
-            jnp.array([
-                atari_action == Action.LEFT,
-                atari_action == Action.UPLEFT,
-                atari_action == Action.DOWNLEFT,
-                atari_action == Action.LEFTFIRE,
-                atari_action == Action.UPLEFTFIRE,
-                atari_action == Action.DOWNLEFTFIRE
-            ])
-        )
-
-        down_pressed = jnp.any(
-            jnp.array([
-                atari_action == Action.DOWN,
-                atari_action == Action.DOWNLEFT,
-                atari_action == Action.DOWNRIGHT,
-                atari_action == Action.DOWNFIRE,
-                atari_action == Action.DOWNLEFTFIRE,
-                atari_action == Action.DOWNRIGHTFIRE,
-            ])
-        )
-
-        fire_pressed = jnp.any(
-            jnp.array([
-                atari_action == Action.FIRE,
-                atari_action == Action.RIGHTFIRE,
-                atari_action == Action.LEFTFIRE,
-                atari_action == Action.UPFIRE,
-                atari_action == Action.DOWNFIRE,
-                atari_action == Action.UPLEFTFIRE,
-                atari_action == Action.UPRIGHTFIRE,
-                atari_action == Action.DOWNLEFTFIRE,
-                atari_action == Action.DOWNRIGHTFIRE,
-            ])
-        )
-
-
-        ###
-        ### Player Movement Controller
-        ###
-
-        ## If vel is needed
-        ## vel_x = jnp.where(
-        ##     right_pressed,
-        ##     self.consts.PLAYER_SPEED,
-        ##     jnp.where(left_pressed, -self.consts.PLAYER_SPEED, 0)
-        ## )
-        ##
-        ## vel_y = ## TODO
-
-        player_x = jnp.where(
-            right_pressed, 
-            jnp.where(
-                state.step_count % 2 == 0, 
-                jnp.clip(player_x + self.consts.PLAYER_SPEED, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH), ## TODO: Clipping
-                player_x
-            ),
-            jnp.where(
-                left_pressed, 
-                jnp.where(
-                    state.step_count % 4 == 0, 
-                    jnp.clip(player_x - self.consts.PLAYER_SPEED, self.consts.GAME_AREA_MIN_X - self.consts.PLAYER_WIDTH / 2, self.consts.GAME_AREA_MAX_X), ## TODO: Clipping
-                    player_x
-                ), 
-                player_x
-            )
-        )
-
-        up_pressed = jnp.where(player_jumping, False, up_pressed)
-        down_pressed = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, down_pressed) ## TODO: Maybe change for 2nd stage?
-        
-        player_jumping = jnp.where(
-            player_jumping,
-            player_jumping, 
-            jnp.where(
-                jnp.logical_and(up_pressed, player_in_air_step < 71), 
-                True, 
-                False
-            )
-        )
-        
-        player_falling = jnp.where(
-            jnp.logical_and(
-                jnp.logical_or(player_falling, player_in_air_step >= 71), 
-                player_y != self.consts.PLAYER_INIT_Y
-            ), 
-            True, 
-            player_falling
-        )
-        
-        player_fast_falling = jnp.where(
-            player_fast_falling,
-            player_fast_falling,
-            jnp.where(
-                jnp.logical_and(
-                    down_pressed,
-                    jnp.logical_or(player_jumping, player_falling)
-                ),
-                True,
-                False
-            )
-        )
-
-        player_falling = jnp.where(
-            player_fast_falling,
-            False,
-            player_falling,
-        )
-
-        player_jumping = jnp.where(
-            jnp.logical_or(player_falling, player_fast_falling),
-            False,
-            player_jumping
-        )
-        
-        player_in_air_step = jnp.where( ## Start immediately falling when reaching the peak of the jump
-            player_in_air_step >= 71, 
-            63, 
-            player_in_air_step
-        )
-        
-        player_y = jnp.where(
-            player_fast_falling,
-            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Correct this
-            jnp.where(
-                player_jumping, 
-                player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
-                jnp.where(
-                    player_falling, 
-                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
-                    player_y
-                )
-            )
-        )
-
-        player_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_falling)
-        player_fast_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_fast_falling)
-
-        player_in_air_step = jnp.where(
-            player_jumping, 
-            player_in_air_step + 1, 
-            jnp.where(
-                player_y == self.consts.PLAYER_INIT_Y,
-                0,
-                jnp.where(
-                    jnp.logical_or(player_falling, player_fast_falling), 
-                    player_in_air_step - 1, 
-                    0,
-                )
-            )
-        )
-
-
-        ###
-        ### Player Bullet controller
-        ###
-
-        fire_pressed = jnp.where(
-            jnp.logical_or(player_bullet_active, player_bullet_step >= 30),
-            False,
-            fire_pressed
-        )
-
-        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active -- TODO: Hit enemy
-            player_bullet_step < 30, 
-            jnp.where(
-                player_bullet_active,
-                player_bullet_active,
-                jnp.where(
-                    fire_pressed,
-                    True,
-                    False
-                )
-            ),
-            False
-        )
-
-        player_bullet_x = jnp.where(
-            jnp.logical_and(player_bullet_active, player_bullet_x == -1), 
-            player_x + self.consts.PLAYER_WIDTH + 2, ## TODO: +2 or +3?
-            jnp.where(
-                player_bullet_active,
-                player_bullet_x + 2,
-                -1
-            )
-        )
-
-        player_bullet_y = jnp.where(
-            jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
-            player_y + 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
-            jnp.where(
-                player_bullet_active,
-                player_bullet_y + 2,
-                -1
-            )
-        )
-
-        player_bullet_step = jnp.where(
-            player_bullet_active,
-            player_bullet_step + 1,
-            -1
-        )
-
-        player_bullet_active = jnp.where(
-            player_bullet_step >= 30,
-            False,
-            player_bullet_active
-        )
-
-        ## TODO: Create player_bullet_speed_velocity (if needed)
+        player_direction = jnp.where(
+            left, -1, jnp.where(right, 1, state.player_direction)
+        ).astype(jnp.int32)
 
         return state.replace( ## TODO: Use state.replace or output just the values?
             player_x = player_x.astype(jnp.float32),
@@ -679,6 +485,8 @@ class JaxJamesBond(
     def _calculate_reward_placeholder(
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
+        """Return the step reward until scoring events are implemented."""
+
         del previous_state, state
         return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
 
@@ -690,6 +498,8 @@ class JaxJamesBond(
 
 
 class JamesBondRenderer(JAXGameRenderer):
+    """Procedural rectangle renderer for the skeleton environment."""
+
     def __init__(
         self,
         consts: JamesBondConstants = None,
@@ -731,6 +541,8 @@ class JamesBondRenderer(JAXGameRenderer):
 
     @partial(jax.jit, static_argnums=(0,))
     def render(self, state: JamesBondState) -> jnp.ndarray:
+        """Render a simple background, inactive object slots, and player box."""
+
         raster = self.jr.create_object_raster(self.BACKGROUND)
         raster = self._render_background(raster)
         raster = self._render_objects(raster, state)
@@ -738,6 +550,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray:
+        """Draw the placeholder play area."""
+
         position = jnp.array(
             [[self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MIN_Y]],
             dtype=jnp.int32,
@@ -754,6 +568,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
     def _render_player(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the player placeholder rectangle."""
+
         position = jnp.stack(
             [
                 jnp.round(state.player_x).astype(jnp.int32),
@@ -766,6 +582,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.draw_rects(raster, position, size, self.PLAYER_ID)
 
     def _render_objects(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw any active placeholder object rectangles."""
+
         raster = self._render_object_group(
             raster,
             state.diamond_x,
@@ -804,6 +622,8 @@ class JamesBondRenderer(JAXGameRenderer):
         height: int,
         color_id: int,
     ) -> jnp.ndarray:
+        """Draw a fixed-size object group, hiding inactive slots at x=-1."""
+
         draw_x = jnp.where(active, jnp.round(x).astype(jnp.int32), -1)
         draw_y = jnp.round(y).astype(jnp.int32)
         positions = jnp.stack([draw_x, draw_y], axis=1)
