@@ -49,7 +49,26 @@ class JamesBondConstants(struct.PyTreeNode):
 
     ACTION_MEANINGS: Tuple[str, ...] = struct.field(
         pytree_node=False,
-        default=("NOOP", "UP", "DOWN", "LEFT", "RIGHT", "FIRE"),
+        default=(
+            "NOOP", 
+            "FIRE", 
+            "UP", 
+            "RIGHT", 
+            "LEFT", 
+            "DOWN",
+            "UPRIGHT",
+            "UPLEFT",
+            "DOWNRIGHT",
+            "DOWNLEFT",
+            "UPFIRE",
+            "RIGHTFIRE",
+            "LEFTFIRE",
+            "DOWNFIRE",
+            "UPRIGHTFIRE",
+            "UPLEFTFIRE",
+            "DOWNRIGHTFIRE",
+            "DOWNLEFTFIRE"
+            ),
     )
 
     BACKGROUND_COLOR: Tuple[int, int, int] = struct.field(
@@ -129,7 +148,27 @@ class JaxJamesBond(
 ):
     # Compact agent action indices map to these ALE-style actions.
     ACTION_SET: jnp.ndarray = jnp.array(
-        [Action.NOOP, Action.UP, Action.DOWN, Action.LEFT, Action.RIGHT, Action.FIRE],
+        [
+            Action.NOOP, 
+            Action.NOOP, 
+            Action.FIRE, 
+            Action.UP, 
+            Action.RIGHT, 
+            Action.LEFT, 
+            Action.DOWN,
+            Action.UPRIGHT,
+            Action.UPLEFT,
+            Action.DOWNRIGHT,
+            Action.DOWNLEFT,
+            Action.UPFIRE,
+            Action.RIGHTFIRE,
+            Action.LEFTFIRE,
+            Action.DOWNFIRE,
+            Action.UPRIGHTFIRE,
+            Action.UPLEFTFIRE,
+            Action.DOWNRIGHTFIRE,
+            Action.DOWNLEFTFIRE
+        ],
         dtype=jnp.int32,
     )
 
