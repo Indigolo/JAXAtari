@@ -16,16 +16,16 @@ from jaxatari.rendering import jax_rendering_utils as render_utils
 class JamesBondConstants(struct.PyTreeNode):
     SCREEN_WIDTH: int = struct.field(pytree_node=False, default=160)
     SCREEN_HEIGHT: int = struct.field(pytree_node=False, default=210)
-    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=8)
-    GAME_AREA_MAX_X: int = struct.field(pytree_node=False, default=152)
+    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=8) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
+    GAME_AREA_MAX_X: int = struct.field(pytree_node=False, default=152) ## Playable Area: 81 (Coordinate system starting with 1)
     GAME_AREA_MIN_Y: int = struct.field(pytree_node=False, default=28)
     GAME_AREA_MAX_Y: int = struct.field(pytree_node=False, default=196)
 
-    PLAYER_WIDTH: int = struct.field(pytree_node=False, default=10)
-    PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=32)
-    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160)
-    PLAYER_SPEED: float = struct.field(pytree_node=False, default=2.0)
+    PLAYER_WIDTH: int = struct.field(pytree_node=False, default=8)
+    PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=4)
+    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=32) ## 30 if starting from the left
+    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160) ## 120 with top-left coordinate system, and starting from the top
+    PLAYER_SPEED: float = struct.field(pytree_node=False, default=1.0)
     GRAVITY: float = struct.field(pytree_node=False, default=0.0)
     JUMP_VELOCITY: float = struct.field(pytree_node=False, default=0.0)
 
@@ -326,7 +326,7 @@ class JaxJamesBond(
             state.bullet_active,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0),
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## TODO: Isn't 90/270 Top/Bottom, which coordinate system are we using?
         )
         return JamesBondObservation(
             player=player,
@@ -384,21 +384,21 @@ class JaxJamesBond(
         down = atari_action == Action.DOWN
 
         player_vx = (
-            right.astype(jnp.float32) - left.astype(jnp.float32)
+            right.astype(jnp.float32) - left.astype(jnp.float32) ## TODO: Right -> Every 2nd frame; Left -> Every 4th frame
         ) * self.consts.PLAYER_SPEED
         player_vy = (
             down.astype(jnp.float32) - up.astype(jnp.float32)
-        ) * self.consts.PLAYER_SPEED
+        ) * self.consts.PLAYER_SPEED ## TODO: Falling speed is quicker than x-axis speed
 
         player_x = jnp.clip(
             state.player_x + player_vx,
             self.consts.GAME_AREA_MIN_X,
-            self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH,
+            self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH, ## TODO: Is this defined as half of the map?
         )
         player_y = jnp.clip(
             state.player_y + player_vy,
             self.consts.GAME_AREA_MIN_Y,
-            self.consts.GAME_AREA_MAX_Y - self.consts.PLAYER_HEIGHT,
+            self.consts.GAME_AREA_MAX_Y - self.consts.PLAYER_HEIGHT, ## TODO: up->up->up->pause->up->up->up->pause->up->up->up->pause
         )
         player_direction = jnp.where(
             left, -1, jnp.where(right, 1, state.player_direction)
@@ -407,7 +407,7 @@ class JaxJamesBond(
         return state.replace(
             player_x=player_x.astype(jnp.float32),
             player_y=player_y.astype(jnp.float32),
-            player_vx=player_vx.astype(jnp.float32),
+            player_vx=player_vx.astype(jnp.float32), ## TODO: Should we give the speed as well, or just use it for calc?
             player_vy=player_vy.astype(jnp.float32),
             player_direction=player_direction,
         )
@@ -507,7 +507,7 @@ class JamesBondRenderer(JAXGameRenderer):
                 jnp.round(state.player_x).astype(jnp.int32),
                 jnp.round(state.player_y).astype(jnp.int32),
             ]
-        )[None, :]
+        )[None, :] ## TODO: Why this definiton and not just 2 arrays?
         size = jnp.array(
             [[self.consts.PLAYER_WIDTH, self.consts.PLAYER_HEIGHT]], dtype=jnp.int32
         )
