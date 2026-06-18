@@ -537,13 +537,13 @@ class JaxJamesBond(
         
         player_y = jnp.where(
             player_fast_falling,
-            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Correct this
+            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Correct this
             jnp.where(
                 player_jumping, 
                 player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
                 jnp.where(
                     player_falling, 
-                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
+                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
                     player_y
                 )
             )
