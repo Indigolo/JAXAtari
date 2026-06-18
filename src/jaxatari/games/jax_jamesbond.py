@@ -537,13 +537,13 @@ class JaxJamesBond(
         
         player_y = jnp.where(
             player_fast_falling,
-            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Correct this
+            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Correct this
             jnp.where(
                 player_jumping, 
                 player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
                 jnp.where(
                     player_falling, 
-                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
+                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
                     player_y
                 )
             )
@@ -566,9 +566,11 @@ class JaxJamesBond(
             )
         )
 
-        ## Player bullet speed:
+        ## Player bullet veocity:
         ## x = pos + width + 3
         ## y = pos + 1 (or -1 with top left coordinate system)
+
+        ## TODO: Create player_bullet_active, player_bullet_pos, player_bullet_speed_velocity (if needed)
 
         return state.replace( ## TODO: Use state.replace or just the values?
             player_x = player_x.astype(jnp.float32),
