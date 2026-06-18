@@ -556,7 +556,7 @@ class JaxJamesBond(
             player_jumping, 
             player_in_air_step + 1, 
             jnp.where(
-                player_y == state.consts.PLAYER_INIT_Y,
+                player_y == self.consts.PLAYER_INIT_Y,
                 0,
                 jnp.where(
                     jnp.logical_or(player_falling, player_fast_falling), 
