@@ -110,6 +110,12 @@ class JamesBondState:
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
     ## player_direction: chex.Array -- Maybe not needed
+    player_bullet_active: chex.Array
+    player_bullet_step: chex.Array
+    player_bullet_x: chex.Array
+    player_bullet_y: chex.Array
+    ## player_bullet_vx: chex.Array
+    ## player_bullet_vx: chex.Array
     lives: chex.Array
     score: chex.Array
     step_count: chex.Array
@@ -206,6 +212,10 @@ class JaxJamesBond(
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
             player_in_air_step=jnp.array(0, dtype=jnp.int32),
             ## player_direction=jnp.array(1, dtype=jnp.int32), ## TODO: Is there a need for this?
+            player_bullet_active=jnp.array(False, dtype=jnp.bool_),
+            player_bullet_step=jnp.array(-1, dtype=jnp.int32),
+            player_bullet_x=jnp.array(-1, dtype=jnp.int32),
+            player_bullet_y=jnp.array(-1, dtype=jnp.int32),
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
@@ -401,6 +411,11 @@ class JaxJamesBond(
         player_fast_falling = state.player_fast_falling
         player_in_air_step = state.player_in_air_step
 
+        player_bullet_active = state.player_bullet_active
+        player_bullet_step = state.player_bullet_step
+        player_bullet_x = state.player_bullet_x
+        player_bullet_y = state.player_bullet_y
+
         up_pressed = jnp.any(
             jnp.array([
                 atari_action == Action.UP,
@@ -458,7 +473,12 @@ class JaxJamesBond(
                 atari_action == Action.DOWNRIGHTFIRE,
             ])
         )
-        
+
+
+        ###
+        ### Player Movement Controller
+        ###
+
         ## If vel is needed
         ## vel_x = jnp.where(
         ##     right_pressed,
@@ -533,7 +553,11 @@ class JaxJamesBond(
             player_jumping
         )
         
-        player_in_air_step = jnp.where(player_in_air_step >= 71, 63, player_in_air_step) ## Start immediately falling when reaching the peak of the jump
+        player_in_air_step = jnp.where( ## Start immediately falling when reaching the peak of the jump
+            player_in_air_step >= 71, 
+            63, 
+            player_in_air_step
+        )
         
         player_y = jnp.where(
             player_fast_falling,
@@ -566,19 +590,76 @@ class JaxJamesBond(
             )
         )
 
-        ## Player bullet veocity:
-        ## x = pos + width + 3
-        ## y = pos + 1 (or -1 with top left coordinate system)
 
-        ## TODO: Create player_bullet_active, player_bullet_pos, player_bullet_speed_velocity (if needed)
+        ###
+        ### Player Bullet controller
+        ###
 
-        return state.replace( ## TODO: Use state.replace or just the values?
+        fire_pressed = jnp.where(
+            jnp.logical_or(player_bullet_active, player_bullet_step >= 30),
+            False,
+            fire_pressed
+        )
+
+        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active -- TODO: Hit enemy
+            player_bullet_step < 30, 
+            jnp.where(
+                player_bullet_active,
+                player_bullet_active,
+                jnp.where(
+                    fire_pressed,
+                    True,
+                    False
+                )
+            ),
+            False
+        )
+
+        player_bullet_x = jnp.where(
+            jnp.logical_and(player_bullet_active, player_bullet_x == -1), 
+            player_x + self.consts.PLAYER_WIDTH + 2, ## TODO: +2 or +3?
+            jnp.where(
+                player_bullet_active,
+                player_bullet_x + 2,
+                -1
+            )
+        )
+
+        player_bullet_y = jnp.where(
+            jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
+            player_y + 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
+            jnp.where(
+                player_bullet_active,
+                player_bullet_y + 2,
+                -1
+            )
+        )
+
+        player_bullet_step = jnp.where(
+            player_bullet_active,
+            player_bullet_step + 1,
+            -1
+        )
+
+        player_bullet_active = jnp.where(
+            player_bullet_step >= 30,
+            False,
+            player_bullet_active
+        )
+
+        ## TODO: Create player_bullet_speed_velocity (if needed)
+
+        return state.replace( ## TODO: Use state.replace or output just the values?
             player_x = player_x.astype(jnp.float32),
             player_y = player_y.astype(jnp.float32),
             player_jumping = player_jumping.astype(jnp.bool_),
             player_falling = player_falling.astype(jnp.bool_),
             player_fast_falling = player_fast_falling.astype(jnp.bool_),
             player_in_air_step = player_in_air_step.astype(jnp.int32),
+            player_bullet_active = player_bullet_active.astype(jnp.bool_),
+            player_bullet_step = player_bullet_active.astype(jnp.int32),
+            player_bullet_x = player_bullet_active.astype(jnp.int32),
+            player_bullet_y = player_bullet_active.astype(jnp.int32),
             ## player_vx = player_vx.astype(jnp.float32), ## TODO: Should we give the speed as well, or just use it for calc?
             ## player_vy = player_vy.astype(jnp.float32),
         )
