@@ -160,6 +160,7 @@ class JamesBondState:
     score: chex.Array
     step_count: chex.Array
     level_progress: chex.Array
+    hit_cooldown: chex.Array
     diamond_x: chex.Array
     diamond_y: chex.Array
     diamond_active: chex.Array
@@ -269,6 +270,7 @@ class JaxJamesBond(
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
             level_progress=jnp.array(0, dtype=jnp.int32),
+            hit_cooldown=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
@@ -305,6 +307,7 @@ class JaxJamesBond(
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
             reward_delta=jnp.array(0.0, dtype=jnp.float32),
+            hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
             fired_bullet=atari_action == Action.FIRE,
         )
         state = self._step_player(state, atari_action)
@@ -537,6 +540,40 @@ class JaxJamesBond(
                 state.collision_happened, collected_any
             ),
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
+        )
+
+    def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when the player touches an active enemy."""
+
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.enemy_x,
+            state.enemy_y,
+            self.consts.ENEMY_COLLISION_WIDTH,
+            self.consts.ENEMY_COLLISION_HEIGHT,
+        )
+        hazard_collision = jnp.any(jnp.logical_and(state.enemy_active, overlaps))
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(hazard_collision, can_take_damage)
+
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            reward_delta=state.reward_delta
+            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, hazard_collision
+            ),
+            hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
