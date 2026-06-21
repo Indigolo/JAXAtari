@@ -71,9 +71,24 @@ class JamesBondConstants(struct.PyTreeNode):
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
 
+    # Collision boxes are separate from render sizes for future tuning.
+    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
+    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
+    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
+    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
+    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=3)
+    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=2)
+
+    SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
+    SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
+    HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=30)
+
     # Reward constants are named now so scoring work can reuse the contract.
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
+    REWARD_ENEMY: float = struct.field(pytree_node=False, default=2.0)
     REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0)
     REWARD_LOST_LIFE: float = struct.field(pytree_node=False, default=-1.0)
 
