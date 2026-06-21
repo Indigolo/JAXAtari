@@ -170,6 +170,7 @@ class JamesBondState:
     bullet_y: chex.Array
     bullet_vx: chex.Array
     bullet_active: chex.Array
+    reward_delta: chex.Array
     collision_happened: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
@@ -278,6 +279,7 @@ class JaxJamesBond(
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_vx=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
+            reward_delta=jnp.array(0.0, dtype=jnp.float32),
             collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
@@ -302,6 +304,7 @@ class JaxJamesBond(
             collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
+            reward_delta=jnp.array(0.0, dtype=jnp.float32),
             fired_bullet=atari_action == Action.FIRE,
         )
         state = self._step_player(state, atari_action)
@@ -506,6 +509,36 @@ class JaxJamesBond(
         # Future object lifecycle logic belongs here.
         return state
 
+    def _resolve_collectible_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Collect active diamonds that overlap the player collision box."""
+
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.diamond_x,
+            state.diamond_y,
+            self.consts.DIAMOND_COLLISION_WIDTH,
+            self.consts.DIAMOND_COLLISION_HEIGHT,
+        )
+        collected = jnp.logical_and(state.diamond_active, overlaps)
+        collected_any = jnp.any(collected)
+        collected_count = jnp.sum(collected.astype(jnp.int32))
+
+        return state.replace(
+            diamond_active=jnp.logical_and(
+                state.diamond_active, jnp.logical_not(collected)
+            ),
+            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
+            reward_delta=state.reward_delta
+            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, collected_any
+            ),
+            collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
+        )
+
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         return state.replace(
@@ -519,8 +552,8 @@ class JaxJamesBond(
     ) -> chex.Array:
         """Return the step reward until scoring events are implemented."""
 
-        del previous_state, state
-        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+        del previous_state
+        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32) + state.reward_delta
 
     def _is_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
