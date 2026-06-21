@@ -20,6 +20,23 @@ from jaxatari.renderers import JAXGameRenderer
 from jaxatari.rendering import jax_rendering_utils as render_utils
 
 
+def _aabb_overlap(
+    ax: chex.Array,
+    ay: chex.Array,
+    aw: chex.Array,
+    ah: chex.Array,
+    bx: chex.Array,
+    by: chex.Array,
+    bw: chex.Array,
+    bh: chex.Array,
+) -> chex.Array:
+    """Return whether two top-left anchored AABB rectangles overlap."""
+
+    x_overlap = jnp.logical_and(ax < bx + bw, ax + aw > bx)
+    y_overlap = jnp.logical_and(ay < by + bh, ay + ah > by)
+    return jnp.logical_and(x_overlap, y_overlap)
+
+
 class JamesBondConstants(struct.PyTreeNode):
     """Static JamesBond placeholder constants shared by state, spaces, and render."""
 
