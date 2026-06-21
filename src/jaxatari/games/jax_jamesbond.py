@@ -312,7 +312,7 @@ class JaxJamesBond(
         )
         state = self._step_player(state, atari_action)
         state = self._update_objects_placeholder(state)
-        state = self._check_collisions_placeholder(state)
+        state = self._resolve_collisions(state)
 
         _, next_key = jax.random.split(state.key)
         state = state.replace(key=next_key)
@@ -512,6 +512,13 @@ class JaxJamesBond(
         # Future object lifecycle logic belongs here.
         return state
 
+    def _resolve_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Run all collision systems after movement and object updates."""
+
+        state = self._resolve_collectible_collisions(state)
+        state = self._resolve_bullet_enemy_collisions(state)
+        return self._resolve_player_hazard_collisions(state)
+
     def _resolve_collectible_collisions(self, state: JamesBondState) -> JamesBondState:
         """Collect active diamonds that overlap the player collision box."""
 
@@ -610,14 +617,6 @@ class JaxJamesBond(
             + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
             collision_happened=jnp.logical_or(state.collision_happened, hit_any),
             hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
-        )
-
-    def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
-        # Future diamond, enemy, bullet, and life collision logic belongs here.
-        return state.replace(
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
-            collected_diamond=jnp.array(False, dtype=jnp.bool_),
-            hit_enemy=jnp.array(False, dtype=jnp.bool_),
         )
 
     def _calculate_reward_placeholder(
