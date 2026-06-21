@@ -576,6 +576,42 @@ class JaxJamesBond(
             hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
         )
 
+    def _resolve_bullet_enemy_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Deactivate bullets and enemies whose collision boxes overlap."""
+
+        overlaps = _aabb_overlap(
+            state.bullet_x[:, None],
+            state.bullet_y[:, None],
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
+            state.enemy_x[None, :],
+            state.enemy_y[None, :],
+            self.consts.ENEMY_COLLISION_WIDTH,
+            self.consts.ENEMY_COLLISION_HEIGHT,
+        )
+        active_pairs = jnp.logical_and(
+            state.bullet_active[:, None], state.enemy_active[None, :]
+        )
+        hits = jnp.logical_and(active_pairs, overlaps)
+        bullet_hits = jnp.any(hits, axis=1)
+        enemy_hits = jnp.any(hits, axis=0)
+        hit_any = jnp.any(enemy_hits)
+        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))
+
+        return state.replace(
+            bullet_active=jnp.logical_and(
+                state.bullet_active, jnp.logical_not(bullet_hits)
+            ),
+            enemy_active=jnp.logical_and(
+                state.enemy_active, jnp.logical_not(enemy_hits)
+            ),
+            score=state.score + hit_count * self.consts.SCORE_ENEMY,
+            reward_delta=state.reward_delta
+            + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
+            collision_happened=jnp.logical_or(state.collision_happened, hit_any),
+            hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
+        )
+
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         return state.replace(
