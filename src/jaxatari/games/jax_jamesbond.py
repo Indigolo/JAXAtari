@@ -1,3 +1,10 @@
+"""Runnable JamesBond skeleton environment.
+
+This file intentionally defines only the shared environment contract and minimal
+placeholder behavior. Gameplay systems such as object spawning, collisions,
+scoring, lives, and sprite-accurate rendering are left for follow-up work.
+"""
+
 from functools import partial
 from typing import Tuple
 
@@ -14,6 +21,9 @@ from jaxatari.rendering import jax_rendering_utils as render_utils
 
 
 class JamesBondConstants(struct.PyTreeNode):
+    """Static JamesBond placeholder constants shared by state, spaces, and render."""
+
+    # Atari-style frame dimensions and initial play-area bounds.
     SCREEN_WIDTH: int = struct.field(pytree_node=False, default=160)
     SCREEN_HEIGHT: int = struct.field(pytree_node=False, default=210)
     GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=8) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
@@ -101,6 +111,8 @@ class JamesBondConstants(struct.PyTreeNode):
 
 @struct.dataclass
 class JamesBondState:
+    """Full internal state with fixed-size object arrays and active masks."""
+
     player_x: chex.Array
     player_y: chex.Array
     player_vx: chex.Array
@@ -139,6 +151,8 @@ class JamesBondState:
 
 @struct.dataclass
 class JamesBondObservation:
+    """Object-centric observation matching observation_space()."""
+
     player: ObjectObservation
     diamonds: ObjectObservation
     enemies: ObjectObservation
@@ -151,6 +165,8 @@ class JamesBondObservation:
 
 @struct.dataclass
 class JamesBondInfo:
+    """Debug/event info for smoke tests and future gameplay systems."""
+
     collision_happened: jnp.ndarray
     collected_diamond: jnp.ndarray
     hit_enemy: jnp.ndarray
@@ -164,6 +180,8 @@ class JamesBondInfo:
 class JaxJamesBond(
     JaxEnvironment[JamesBondState, JamesBondObservation, JamesBondInfo, JamesBondConstants]
 ):
+    """Minimal runnable JamesBond environment following the JAXAtari API."""
+
     # Compact agent action indices map to these ALE-style actions.
     ACTION_SET: jnp.ndarray = jnp.array(
         [
@@ -198,6 +216,8 @@ class JaxJamesBond(
     def reset(
         self, key: chex.PRNGKey = jax.random.PRNGKey(0)
     ) -> Tuple[JamesBondObservation, JamesBondState]:
+        """Create an empty level state with inactive object slots."""
+
         if key is None:
             key = jax.random.PRNGKey(0)
         state_key, _ = jax.random.split(key)
@@ -243,6 +263,8 @@ class JaxJamesBond(
     def step(
         self, state: JamesBondState, action: chex.Array
     ) -> Tuple[JamesBondObservation, JamesBondState, chex.Array, chex.Array, JamesBondInfo]:
+        """Advance one placeholder frame and return the repo-standard tuple."""
+
         atari_action = self._decode_action(action)
         previous_state = state
 
@@ -324,6 +346,8 @@ class JaxJamesBond(
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_observation(self, state: JamesBondState) -> JamesBondObservation:
+        """Build the structured object observation from internal state."""
+
         player = ObjectObservation.create(
             x=state.player_x,
             y=state.player_y,
@@ -376,6 +400,8 @@ class JaxJamesBond(
         height: int,
         orientation: chex.Array = None,
     ) -> ObjectObservation:
+        """Convert fixed-size object arrays plus masks into ObjectObservation."""
+
         return ObjectObservation.create(
             x=x,
             y=y,
@@ -399,6 +425,8 @@ class JaxJamesBond(
         )
 
     def _decode_action(self, action: chex.Array) -> chex.Array:
+        """Translate compact action-space indices to JAXAtariAction values."""
+
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
     def _step_player(
@@ -690,6 +718,8 @@ class JaxJamesBond(
 
 
 class JamesBondRenderer(JAXGameRenderer):
+    """Procedural rectangle renderer for the skeleton environment."""
+
     def __init__(
         self,
         consts: JamesBondConstants = None,
@@ -731,6 +761,8 @@ class JamesBondRenderer(JAXGameRenderer):
 
     @partial(jax.jit, static_argnums=(0,))
     def render(self, state: JamesBondState) -> jnp.ndarray:
+        """Render a simple background, inactive object slots, and player box."""
+
         raster = self.jr.create_object_raster(self.BACKGROUND)
         raster = self._render_background(raster)
         raster = self._render_objects(raster, state)
@@ -738,6 +770,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray:
+        """Draw the placeholder play area."""
+
         position = jnp.array(
             [[self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MIN_Y]],
             dtype=jnp.int32,
@@ -754,6 +788,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
     def _render_player(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the player placeholder rectangle."""
+
         position = jnp.stack(
             [
                 jnp.round(state.player_x).astype(jnp.int32),
@@ -766,6 +802,8 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.draw_rects(raster, position, size, self.PLAYER_ID)
 
     def _render_objects(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw any active placeholder object rectangles."""
+
         raster = self._render_object_group(
             raster,
             state.diamond_x,
@@ -804,6 +842,8 @@ class JamesBondRenderer(JAXGameRenderer):
         height: int,
         color_id: int,
     ) -> jnp.ndarray:
+        """Draw a fixed-size object group, hiding inactive slots at x=-1."""
+
         draw_x = jnp.where(active, jnp.round(x).astype(jnp.int32), -1)
         draw_y = jnp.round(y).astype(jnp.int32)
         positions = jnp.stack([draw_x, draw_y], axis=1)
