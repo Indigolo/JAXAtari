@@ -149,7 +149,7 @@ class JamesBondState:
     player_falling: chex.Array
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
-    ## player_direction: chex.Array -- Maybe not needed
+    player_direction: chex.Array
     player_bullet_active: chex.Array
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
@@ -261,7 +261,7 @@ class JaxJamesBond(
             player_falling=jnp.array(False, dtype=jnp.bool_),
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
             player_in_air_step=jnp.array(0, dtype=jnp.int32),
-            ## player_direction=jnp.array(1, dtype=jnp.int32), ## TODO: Is there a need for this?
+            player_direction=jnp.array(1, dtype=jnp.int32),
             player_bullet_active=jnp.array(False, dtype=jnp.bool_),
             player_bullet_step=jnp.array(-1, dtype=jnp.int32),
             player_bullet_x=jnp.array(-1, dtype=jnp.int32),
@@ -493,19 +493,12 @@ class JaxJamesBond(
             left, -1, jnp.where(right, 1, state.player_direction)
         ).astype(jnp.int32)
 
-        return state.replace( ## TODO: Use state.replace or output just the values?
-            player_x = player_x.astype(jnp.float32),
-            player_y = player_y.astype(jnp.float32),
-            player_jumping = player_jumping.astype(jnp.bool_),
-            player_falling = player_falling.astype(jnp.bool_),
-            player_fast_falling = player_fast_falling.astype(jnp.bool_),
-            player_in_air_step = player_in_air_step.astype(jnp.int32),
-            player_bullet_active = player_bullet_active.astype(jnp.bool_),
-            player_bullet_step = player_bullet_active.astype(jnp.int32),
-            player_bullet_x = player_bullet_active.astype(jnp.int32),
-            player_bullet_y = player_bullet_active.astype(jnp.int32),
-            ## player_vx = player_vx.astype(jnp.float32), ## TODO: Should we give the speed as well, or just use it for calc?
-            ## player_vy = player_vy.astype(jnp.float32),
+        return state.replace(
+            player_x=player_x.astype(jnp.float32),
+            player_y=player_y.astype(jnp.float32),
+            player_vx=player_vx.astype(jnp.float32),
+            player_vy=player_vy.astype(jnp.float32),
+            player_direction=player_direction,
         )
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
