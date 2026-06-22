@@ -154,6 +154,7 @@ class JamesBondState:
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
     ## player_direction: chex.Array -- Maybe not needed
+    player_direction: chex.Array
     player_bullet_active: chex.Array
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
@@ -266,6 +267,7 @@ class JaxJamesBond(
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
             player_in_air_step=jnp.array(0, dtype=jnp.int32),
             ## player_direction=jnp.array(1, dtype=jnp.int32), ## TODO: Is there a need for this?
+            player_direction=jnp.array(1, dtype=jnp.int32),
             player_bullet_active=jnp.array(False, dtype=jnp.bool_),
             player_bullet_step=jnp.array(-1, dtype=jnp.int32),
             player_bullet_x=jnp.array(-1, dtype=jnp.int32),
@@ -481,6 +483,7 @@ class JaxJamesBond(
         player_bullet_step = state.player_bullet_step
         player_bullet_x = state.player_bullet_x
         player_bullet_y = state.player_bullet_y
+        player_direction = state.player_direction
 
         up_pressed = jnp.any(
             jnp.array([
@@ -553,6 +556,10 @@ class JaxJamesBond(
         ## )
         ##
         ## vel_y = ## TODO
+
+        player_direction = jnp.where(
+            left_pressed, -1, jnp.where(right_pressed, 1, player_direction)
+        ).astype(jnp.int32)
 
         player_x = jnp.where(
             right_pressed, 
@@ -715,6 +722,9 @@ class JaxJamesBond(
 
         ## TODO: Create player_bullet_speed_velocity (if needed)
 
+        player_vx = (player_x - state.player_x).astype(jnp.float32)
+        player_vy = (player_y - state.player_y).astype(jnp.float32)
+
         return state.replace( ## TODO: Use state.replace or output just the values?
             player_x = player_x.astype(jnp.float32),
             player_y = player_y.astype(jnp.float32),
@@ -728,6 +738,9 @@ class JaxJamesBond(
             player_bullet_y = player_bullet_active.astype(jnp.int32),
             ## player_vx = player_vx.astype(jnp.float32), ## TODO: Should we give the speed as well, or just use it for calc?
             ## player_vy = player_vy.astype(jnp.float32),
+            player_vx = player_vx.astype(jnp.float32),
+            player_vy = player_vy.astype(jnp.float32),
+            player_direction = player_direction,
         )
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
