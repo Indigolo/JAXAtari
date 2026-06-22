@@ -749,19 +749,140 @@ class JaxJamesBond(
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
-        return state.replace(
+        state = state.replace(
             collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
         )
+        return self._resolve_collisions(state)
 
     def _calculate_reward_placeholder(
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
-        del previous_state, state
-        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+        if False:
+            del previous_state, state
+            return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+        return self._get_reward(previous_state, state)
 
     def _is_done(self, state: JamesBondState) -> chex.Array:
+        return self._get_done(state)
+
+    def _resolve_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Run all collision systems after movement and object updates."""
+
+        state = self._resolve_collectible_collisions(state)
+        state = self._resolve_bullet_enemy_collisions(state)
+        return self._resolve_player_hazard_collisions(state)
+
+    def _resolve_collectible_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Collect active diamonds that overlap the player collision box."""
+
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.diamond_x,
+            state.diamond_y,
+            self.consts.DIAMOND_COLLISION_WIDTH,
+            self.consts.DIAMOND_COLLISION_HEIGHT,
+        )
+        collected = jnp.logical_and(state.diamond_active, overlaps)
+        collected_any = jnp.any(collected)
+        collected_count = jnp.sum(collected.astype(jnp.int32))
+
+        return state.replace(
+            diamond_active=jnp.logical_and(
+                state.diamond_active, jnp.logical_not(collected)
+            ),
+            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
+            reward_delta=state.reward_delta
+            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, collected_any
+            ),
+            collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
+        )
+
+    def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when the player touches an active enemy."""
+
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.enemy_x,
+            state.enemy_y,
+            self.consts.ENEMY_COLLISION_WIDTH,
+            self.consts.ENEMY_COLLISION_HEIGHT,
+        )
+        hazard_collision = jnp.any(jnp.logical_and(state.enemy_active, overlaps))
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(hazard_collision, can_take_damage)
+
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            reward_delta=state.reward_delta
+            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, hazard_collision
+            ),
+            hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
+        )
+
+    def _resolve_bullet_enemy_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Deactivate bullets and enemies whose collision boxes overlap."""
+
+        overlaps = _aabb_overlap(
+            state.bullet_x[:, None],
+            state.bullet_y[:, None],
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
+            state.enemy_x[None, :],
+            state.enemy_y[None, :],
+            self.consts.ENEMY_COLLISION_WIDTH,
+            self.consts.ENEMY_COLLISION_HEIGHT,
+        )
+        active_pairs = jnp.logical_and(
+            state.bullet_active[:, None], state.enemy_active[None, :]
+        )
+        hits = jnp.logical_and(active_pairs, overlaps)
+        bullet_hits = jnp.any(hits, axis=1)
+        enemy_hits = jnp.any(hits, axis=0)
+        hit_any = jnp.any(enemy_hits)
+        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))
+
+        return state.replace(
+            bullet_active=jnp.logical_and(
+                state.bullet_active, jnp.logical_not(bullet_hits)
+            ),
+            enemy_active=jnp.logical_and(
+                state.enemy_active, jnp.logical_not(enemy_hits)
+            ),
+            score=state.score + hit_count * self.consts.SCORE_ENEMY,
+            reward_delta=state.reward_delta
+            + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
+            collision_happened=jnp.logical_or(state.collision_happened, hit_any),
+            hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
+        )
+
+    def _get_reward(
+        self, previous_state: JamesBondState, state: JamesBondState
+    ) -> chex.Array:
+        """Return the step reward until scoring events are implemented."""
+
+        del previous_state
+        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32) + state.reward_delta
+
+    def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
             state.lives <= 0,
             state.step_count >= self.consts.MAX_EPISODE_STEPS,
