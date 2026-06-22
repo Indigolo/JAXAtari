@@ -221,7 +221,6 @@ class JaxJamesBond(
     ACTION_SET: jnp.ndarray = jnp.array(
         [
             Action.NOOP, 
-            Action.NOOP, 
             Action.FIRE, 
             Action.UP, 
             Action.RIGHT, 
