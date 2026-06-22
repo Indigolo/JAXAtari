@@ -164,6 +164,7 @@ class JamesBondState:
     score: chex.Array
     step_count: chex.Array
     level_progress: chex.Array
+    hit_cooldown: chex.Array
     diamond_x: chex.Array
     diamond_y: chex.Array
     diamond_active: chex.Array
@@ -174,6 +175,7 @@ class JamesBondState:
     bullet_y: chex.Array
     bullet_vx: chex.Array
     bullet_active: chex.Array
+    reward_delta: chex.Array
     collision_happened: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
@@ -272,6 +274,7 @@ class JaxJamesBond(
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
             level_progress=jnp.array(0, dtype=jnp.int32),
+            hit_cooldown=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
@@ -282,6 +285,7 @@ class JaxJamesBond(
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_vx=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
+            reward_delta=jnp.array(0.0, dtype=jnp.float32),
             collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
@@ -305,6 +309,8 @@ class JaxJamesBond(
             collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
+            reward_delta=jnp.array(0.0, dtype=jnp.float32),
+            hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
             fired_bullet=atari_action == Action.FIRE,
         )
         state = self._step_player(state, atari_action)
