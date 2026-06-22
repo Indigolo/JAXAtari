@@ -318,8 +318,8 @@ class JaxJamesBond(
         state = state.replace(key=next_key)
 
         observation = self._get_observation(state)
-        reward = self._calculate_reward_placeholder(previous_state, state)
-        done = self._is_done(state)
+        reward = self._get_reward(previous_state, state)
+        done = self._get_done(state)
         info = self._get_info(state)
 
         return observation, state, reward, done, info
@@ -619,7 +619,7 @@ class JaxJamesBond(
             hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
         )
 
-    def _calculate_reward_placeholder(
+    def _get_reward(
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
         """Return the step reward until scoring events are implemented."""
@@ -627,7 +627,7 @@ class JaxJamesBond(
         del previous_state
         return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32) + state.reward_delta
 
-    def _is_done(self, state: JamesBondState) -> chex.Array:
+    def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
             state.lives <= 0,
             state.step_count >= self.consts.MAX_EPISODE_STEPS,
