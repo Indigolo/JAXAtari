@@ -74,18 +74,18 @@ class JamesBondConstants(struct.PyTreeNode):
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=4)
     ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
     ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
-    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
+    BULLET_WIDTH: int = struct.field(pytree_node=False, default=1)
+    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
-    # Collision boxes are separate from render sizes for future tuning.
+    # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
     PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
     PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
     DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
     DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
     ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
     ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=3)
-    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=2)
+    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1)
+    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
