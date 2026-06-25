@@ -70,26 +70,17 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
-    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=4)
-    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_WIDTH: int = struct.field(pytree_node=False, default=1)
-    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
-
-    # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
-    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
-    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1)
-    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-
-    SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
-    SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
-    HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=30)
+    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
+    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=13) ##TODO: There is 13 pixels in the diamond sprite, including the shining thing of diamond 
+    ## ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
+    ## ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    ## TODO: Enemies (now i only have the helicopter and satellite enemies)
+    HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
+    HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
+    SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Satellite width is 8 pixels
+    SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
+    BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
+    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -169,9 +160,17 @@ class JamesBondState:
     diamond_x: chex.Array
     diamond_y: chex.Array
     diamond_active: chex.Array
-    enemy_x: chex.Array
-    enemy_y: chex.Array
-    enemy_active: chex.Array
+    spawn_diamond_next: chex.Array
+    ## enemy_x: chex.Array
+    ## enemy_y: chex.Array
+    ## enemy_active: chex.Array
+    ## TODO: Here using helicopter and satellite instead of enemy
+    helicopter_x: chex.Array
+    helicopter_y: chex.Array
+    helicopter_active: chex.Array
+    satellite_x: chex.Array
+    satellite_y: chex.Array
+    satellite_active: chex.Array
     bullet_x: chex.Array
     bullet_y: chex.Array
     bullet_vx: chex.Array
@@ -744,7 +743,111 @@ class JaxJamesBond(
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future object lifecycle logic belongs here.
-        return state
+
+        # === 1. Movement and off-screen cleanup ===
+        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter, will change if it is wrong
+        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte, will change if it is wrong
+
+        # Diamonds (Scroll left)
+        next_diamond_x = state.diamond_x - SPEED_R2L ## TODO: Diamond speed, will change if old speed is wrong
+        diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
+        next_diamond_active = state.diamond_active & diamond_on_screen
+
+        # Enemies
+        ## Helicopter enemy (Scroll left)
+        next_helicopter_x = state.helicopter_x - SPEED_R2L ## TODO: Helicopter enemy speed, will change if old speed is wrong
+        helicopter_on_screen = next_helicopter_x >= (self.consts.GAME_AREA_MIN_X - self.consts.HELICOPTER_ENEMY_WIDTH)
+        next_helicopter_active = state.helicopter_active & helicopter_on_screen
+        ## Satellite enemy (Scroll right)
+        next_satellite_x = state.satellite_x + SPEED_L2R ## TODO: Satellite enemy speed, will change if old speed is wrong
+        satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
+        next_satellite_active = state.satellite_active & satellite_on_screen
+
+        # === 2. Spawning logic ===
+        ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
+        ## Rule: Alternative spawning only when the entire row is empty
+        row_57_empty = ~jnp.any(next_helicopter_active) & ~jnp.any(next_diamond_active)
+        # Check whose turn it is to spawn
+        spawn_diamond = row_57_empty & state.spawn_diamond_next
+        spawn_helicopter = row_57_empty & ~state.spawn_diamond_next
+        # Flip the turn flag ONLY if a spawn is happening on this frame
+        next_spawn_diamond_next = jnp.where(
+            row_57_empty,
+            ~state.spawn_diamond.next, ## Swap to the other object for next time
+            state.spawn_diamond.next ## Keep it the same while they are flying
+        )
+        # Diamonds
+        available_diamond_idx = jnp.argmin(next_diamond_active) ## Get the first inactive diamond index
+
+        # Apply new active status, position coordinates for spawned diamonds
+        next_diamond_active = next_diamond_active.at[available_diamond_idx].set(
+            jnp.where(spawn_diamond,
+                      True, 
+                      next_diamond_active[available_diamond_idx])
+        )
+        next_diamond_x = next_diamond_x.at[available_diamond_idx].set(
+            jnp.where(spawn_diamond,
+                      self.consts.GAME_AREA_MAX_X,
+                      next_diamond_x[available_diamond_idx])
+        )
+        next_diamond_y = next_diamond_y.at[available_diamond_idx].set(
+            jnp.where(spawn_diamond,
+                      57.0, ## TODO: Diamond spawn height, will change if the number is wrong
+                      state.diamond_y[available_diamond_idx])
+        )
+
+        # Enemies
+        ## Helicopter enemy
+        available_helicopter_idx = jnp.argmin(next_helicopter_active) ## Get the first inactive helicopter index
+
+        # Apply new active status, position coordinates for spawned helicopter enemies
+        next_helicopter_active = next_helicopter_active.at[available_helicopter_idx].set(
+            jnp.where(spawn_helicopter,
+                      True,
+                      next_helicopter_active[available_helicopter_idx])
+        )
+        next_helicopter_x = next_helicopter_x.at[available_helicopter_idx].set(
+            jnp.where(spawn_helicopter,
+                      self.consts.GAME_AREA_MAX_X,
+                      next_helicopter_x[available_helicopter_idx])
+        )
+        next_helicopter_y = next_helicopter_y.at[available_helicopter_idx].set(
+            jnp.where(spawn_helicopter,
+                      57.0, ## TODO: Helicopter spawn at the same height as diamond, will change if the number is wrong
+                      state.helicopter_y[available_helicopter_idx])
+        )
+        ## Satellite enemy
+        available_satellite_idx = jnp.argmin(next_satellite_active) ## Get the first inactive satellite index
+        can_spawn_satellite = ~jnp.any(next_satellite_active) ## Only spawn if the chosen index is inactive
+        # Apply new active status, position coordinates for spawned satellite enemies
+        next_satellite_active = next_satellite_active.at[available_satellite_idx].set(
+            jnp.where(can_spawn_satellite,
+                      True,
+                      next_satellite_active[available_satellite_idx])
+        )
+        next_satellite_x = next_satellite_x.at[available_satellite_idx].set(
+            jnp.where(can_spawn_satellite,
+                      self.consts.GAME_AREA_MIN_X - self.consts.SATELLITE_ENEMY_WIDTH, ## TODO: In game, 
+                      next_satellite_x[available_satellite_idx])
+        )
+        next_satellite_y = next_satellite_y.at[available_satellite_idx].set(
+            jnp.where(can_spawn_satellite,
+                      75.0, ## TODO: Satellite spawn height, will change if the number is wrong
+                      state.satellite_y[available_satellite_idx])
+        )
+
+        return state.replace(
+            diamond_x=next_diamond_x,
+            diamond_y=next_diamond_y,
+            diamond_active=next_diamond_active,
+            helicopter_x=next_helicopter_x,
+            helicopter_y=next_helicopter_y,
+            helicopter_active=next_helicopter_active,
+            satellite_x=next_satellite_x,
+            satellite_y=next_satellite_y,
+            satellite_active=next_satellite_active,
+            spawn_diamond_next=next_spawn_diamond_next
+        )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
