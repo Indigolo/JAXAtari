@@ -866,6 +866,30 @@ class JaxJamesBond(
             enemy_active=jnp.logical_and(
                 state.enemy_active, jnp.logical_not(enemy_hits)
             ),
+            ##player_bullet_x=jnp.where(
+            ##    jnp.logical_and(
+            ##        state.bullet_active, 
+            ##        jnp.logical_not(bullet_hits)
+            ##    ),
+            ##    state.player_bullet_x,
+            ##    -1
+            ##),
+            ##player_bullet_y=jnp.where(
+            ##    jnp.logical_and(
+            ##        state.bullet_active, 
+            ##        jnp.logical_not(bullet_hits)
+            ##    ),
+            ##    state.player_bullet_y,
+            ##    -1
+            ##),
+            ##player_bullet_step=jnp.where(
+            ##    jnp.logical_and(
+            ##        state.bullet_active, 
+            ##        jnp.logical_not(bullet_hits)
+            ##    ),
+            ##    state.player_bullet_step,
+            ##    -1
+            ##),
             score=state.score + hit_count * self.consts.SCORE_ENEMY,
             reward_delta=state.reward_delta
             + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
