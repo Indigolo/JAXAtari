@@ -171,9 +171,9 @@ class JamesBondState:
     diamond_y: chex.Array
     diamond_active: chex.Array
     spawn_diamond_next: chex.Array
-    enemy_x: chex.Array
-    enemy_y: chex.Array
-    enemy_active: chex.Array
+    ## enemy_x: chex.Array
+    ## enemy_y: chex.Array
+    ## enemy_active: chex.Array
     ## TODO: Here using helicopter and satellite instead of enemy
     helicopter_x: chex.Array
     helicopter_y: chex.Array
