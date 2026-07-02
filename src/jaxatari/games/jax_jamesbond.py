@@ -746,8 +746,10 @@ class JaxJamesBond(
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
-        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter, will change if it is wrong
-        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte, will change if it is wrong
+        ## TODO: Checking the speed of objects per frame, will change if it is wrong, if the speed is constant, then move to consts
+        ## TODO: If the speed is not float, then use jnp.where to move it
+        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter
+        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte
 
         # Diamonds (Scroll left)
         next_diamond_x = state.diamond_x - SPEED_R2L ## TODO: Diamond speed, will change if old speed is wrong
@@ -1117,33 +1119,33 @@ class JamesBondRenderer(JAXGameRenderer):
             self.consts.DIAMOND_HEIGHT,
             self.DIAMOND_ID,
         )
+        ## raster = self._render_object_group(
+        ##     raster,
+        ##     state.enemy_x,
+        ##     state.enemy_y,
+        ##     state.enemy_active,
+        ##     self.consts.ENEMY_WIDTH,
+        ##     self.consts.ENEMY_HEIGHT,
+        ##     self.ENEMY_ID,
+        ## )
         raster = self._render_object_group(
             raster,
-            state.enemy_x,
-            state.enemy_y,
-            state.enemy_active,
-            self.consts.ENEMY_WIDTH,
-            self.consts.ENEMY_HEIGHT,
+            state.helicopter_x,
+            state.helicopter_y,
+            state.helicopter_active,
+            self.consts.HELICOPTER_ENEMY_WIDTH,
+            self.consts.HELICOPTER_ENEMY_HEIGHT,
             self.ENEMY_ID,
         )
-        ## raster = self._render_object_group(
-        ##     raster,
-        ##     state.helicopter_x,
-        ##     state.helicopter_y,
-        ##     state.helicopter_active,
-        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
-        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
-        ##     self.ENEMY_ID,
-        ## )
-        ## raster = self._render_object_group(
-        ##     raster,
-        ##     state.satellite_x,
-        ##     state.satellite_y,
-        ##     state.satellite_active,
-        ##     self.consts.SATELLITE_ENEMY_WIDTH,
-        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
-        ##     self.ENEMY_ID,
-        ## )
+        raster = self._render_object_group(
+            raster,
+            state.satellite_x,
+            state.satellite_y,
+            state.satellite_active,
+            self.consts.SATELLITE_ENEMY_WIDTH,
+            self.consts.SATELLITE_ENEMY_HEIGHT,
+            self.ENEMY_ID,
+        )
         return self._render_object_group(
             raster,
             state.bullet_x,
