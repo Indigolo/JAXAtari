@@ -64,9 +64,9 @@ class JamesBondConstants(struct.PyTreeNode):
 
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
-    ## MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
-    MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
-    MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
+    MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
+    ## MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
+    ## MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
     MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
@@ -171,9 +171,9 @@ class JamesBondState:
     diamond_y: chex.Array
     diamond_active: chex.Array
     spawn_diamond_next: chex.Array
-    ## enemy_x: chex.Array
-    ## enemy_y: chex.Array
-    ## enemy_active: chex.Array
+    enemy_x: chex.Array
+    enemy_y: chex.Array
+    enemy_active: chex.Array
     ## TODO: Here using helicopter and satellite instead of enemy
     helicopter_x: chex.Array
     helicopter_y: chex.Array
@@ -198,9 +198,9 @@ class JamesBondObservation:
 
     player: ObjectObservation
     diamonds: ObjectObservation
-    ## enemies: ObjectObservation
-    helicopters: ObjectObservation
-    satellites: ObjectObservation
+    enemies: ObjectObservation
+    ## helicopters: ObjectObservation
+    ## satellites: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -286,15 +286,17 @@ class JaxJamesBond(
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
             spawn_diamond_next=jnp.array(True, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional?
-            ## enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
-            ## enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
-            ## enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
-            helicopter_x=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
-            helicopter_y=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
-            helicopter_active=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.bool_),
-            satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
-            satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
-            satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
+            ## TODO: Change / Remove after observation and collision enemy variables have been changed; or else will cause fail tests
+            enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
+            enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
+            enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
+            ## TODO: Here using helicopter and satellite instead of enemy
+            helicopter_x=jnp.zeros(-1, dtype=jnp.float32),
+            helicopter_y=jnp.zeros(-1, dtype=jnp.float32),
+            helicopter_active=jnp.zeros(False, dtype=jnp.bool_),
+            satellite_x=jnp.zeros(-1, dtype=jnp.float32),
+            satellite_y=jnp.zeros(-1, dtype=jnp.float32),
+            satellite_active=jnp.zeros(False, dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
@@ -354,15 +356,15 @@ class JaxJamesBond(
                 "diamonds": spaces.get_object_space(
                     n=self.consts.MAX_DIAMONDS, screen_size=screen_size
                 ),
-                ## "enemies": spaces.get_object_space(
-                ##     n=self.consts.MAX_ENEMIES, screen_size=screen_size
+                "enemies": spaces.get_object_space(
+                    n=self.consts.MAX_ENEMIES, screen_size=screen_size
+                ),
+                ## "helicopters": spaces.get_object_space(
+                ##     n=self.consts.MAX_HELICOPTERS, screen_size=screen_size
                 ## ),
-                "helicopters": spaces.get_object_space(
-                    n=self.consts.MAX_HELICOPTERS, screen_size=screen_size
-                ),
-                "satellites": spaces.get_object_space(
-                    n=self.consts.MAX_SATELLITES, screen_size=screen_size
-                ),
+                ## "satellites": spaces.get_object_space(
+                ##     n=self.consts.MAX_SATELLITES, screen_size=screen_size
+                ## ),
                 "bullets": spaces.get_object_space(
                     n=self.consts.MAX_BULLETS, screen_size=screen_size
                 ),
@@ -413,27 +415,27 @@ class JaxJamesBond(
             self.consts.DIAMOND_WIDTH,
             self.consts.DIAMOND_HEIGHT,
         )
-        ## enemies = self._object_group_observation(
-        ##     state.enemy_x,
-        ##     state.enemy_y,
-        ##     state.enemy_active,
-        ##     self.consts.ENEMY_WIDTH,
-        ##     self.consts.ENEMY_HEIGHT,
+        enemies = self._object_group_observation(
+            state.enemy_x,
+            state.enemy_y,
+            state.enemy_active,
+            self.consts.ENEMY_WIDTH,
+            self.consts.ENEMY_HEIGHT,
+        )
+        ## helicopters = self._object_group_observation(
+        ##     state.helicopter_x,
+        ##     state.helicopter_y,
+        ##     state.helicopter_active,
+        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
+        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
         ## )
-        helicopters = self._object_group_observation(
-            state.helicopter_x,
-            state.helicopter_y,
-            state.helicopter_active,
-            self.consts.HELICOPTER_ENEMY_WIDTH,
-            self.consts.HELICOPTER_ENEMY_HEIGHT,
-        )
-        satellites = self._object_group_observation(
-            state.satellite_x,
-            state.satellite_y,
-            state.satellite_active,
-            self.consts.SATELLITE_ENEMY_WIDTH,
-            self.consts.SATELLITE_ENEMY_HEIGHT,
-        )
+        ## satellites = self._object_group_observation(
+        ##     state.satellite_x,
+        ##     state.satellite_y,
+        ##     state.satellite_active,
+        ##     self.consts.SATELLITE_ENEMY_WIDTH,
+        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
+        ## )
         bullets = self._object_group_observation(
             state.bullet_x,
             state.bullet_y,
@@ -445,9 +447,9 @@ class JaxJamesBond(
         return JamesBondObservation(
             player=player,
             diamonds=diamonds,
-            ##enemies=enemies,
-            helicopters=helicopters,
-            satellites=satellites,
+            enemies=enemies,
+            ## helicopters=helicopters,
+            ## satellites=satellites,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
@@ -1119,33 +1121,33 @@ class JamesBondRenderer(JAXGameRenderer):
             self.consts.DIAMOND_HEIGHT,
             self.DIAMOND_ID,
         )
+        raster = self._render_object_group(
+            raster,
+            state.enemy_x,
+            state.enemy_y,
+            state.enemy_active,
+            self.consts.ENEMY_WIDTH,
+            self.consts.ENEMY_HEIGHT,
+            self.ENEMY_ID,
+        )
         ## raster = self._render_object_group(
         ##     raster,
-        ##     state.enemy_x,
-        ##     state.enemy_y,
-        ##     state.enemy_active,
-        ##     self.consts.ENEMY_WIDTH,
-        ##     self.consts.ENEMY_HEIGHT,
+        ##     state.helicopter_x,
+        ##     state.helicopter_y,
+        ##     state.helicopter_active,
+        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
+        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
         ##     self.ENEMY_ID,
         ## )
-        raster = self._render_object_group(
-            raster,
-            state.helicopter_x,
-            state.helicopter_y,
-            state.helicopter_active,
-            self.consts.HELICOPTER_ENEMY_WIDTH,
-            self.consts.HELICOPTER_ENEMY_HEIGHT,
-            self.ENEMY_ID,
-        )
-        raster = self._render_object_group(
-            raster,
-            state.satellite_x,
-            state.satellite_y,
-            state.satellite_active,
-            self.consts.SATELLITE_ENEMY_WIDTH,
-            self.consts.SATELLITE_ENEMY_HEIGHT,
-            self.ENEMY_ID,
-        )
+        ## raster = self._render_object_group(
+        ##     raster,
+        ##     state.satellite_x,
+        ##     state.satellite_y,
+        ##     state.satellite_active,
+        ##     self.consts.SATELLITE_ENEMY_WIDTH,
+        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
+        ##     self.ENEMY_ID,
+        ## )
         return self._render_object_group(
             raster,
             state.bullet_x,
