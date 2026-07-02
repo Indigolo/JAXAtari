@@ -65,8 +65,8 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
     MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
-    ## MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
-    ## MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
+    MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
+    MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
     MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
@@ -291,12 +291,12 @@ class JaxJamesBond(
             enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
             enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
             ## TODO: Here using helicopter and satellite instead of enemy
-            helicopter_x=jnp.zeros(-1, dtype=jnp.float32),
-            helicopter_y=jnp.zeros(-1, dtype=jnp.float32),
-            helicopter_active=jnp.zeros(False, dtype=jnp.bool_),
-            satellite_x=jnp.zeros(-1, dtype=jnp.float32),
-            satellite_y=jnp.zeros(-1, dtype=jnp.float32),
-            satellite_active=jnp.zeros(False, dtype=jnp.bool_),
+            helicopter_x=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
+            helicopter_y=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
+            helicopter_active=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.bool_),
+            satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
+            satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
+            satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
