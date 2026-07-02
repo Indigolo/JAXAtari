@@ -154,9 +154,9 @@ class JamesBondState:
     diamond_y: chex.Array
     diamond_active: chex.Array
     spawn_diamond_next: chex.Array
-    ## enemy_x: chex.Array
-    ## enemy_y: chex.Array
-    ## enemy_active: chex.Array
+    enemy_x: chex.Array
+    enemy_y: chex.Array
+    enemy_active: chex.Array
     ## TODO: Here using helicopter and satellite instead of enemy
     helicopter_x: chex.Array
     helicopter_y: chex.Array
@@ -267,9 +267,10 @@ class JaxJamesBond(
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
             spawn_diamond_next=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_), ## TODO: Change to correct type
-            ## enemy_x: chex.Array
-            ## enemy_y: chex.Array
-            ## enemy_active: chex.Array
+            ## TODO: Change / Remove after observation and collision enemey variables have been changed; or else will cause fail tests
+            enemy_x=jnp.array(-1, dtype=jnp.int32),
+            enemy_y=jnp.array(-1, dtype=jnp.int32),
+            enemy_active=jnp.array(False, dtype=jnp.bool_),
             ## TODO: Here using helicopter and satellite instead of enemy
             ## TODO: Change to correct default values
             helicopter_x=jnp.array(-1, dtype=jnp.int32),
