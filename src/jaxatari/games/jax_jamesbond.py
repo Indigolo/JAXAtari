@@ -54,15 +54,13 @@ class JamesBondConstants(struct.PyTreeNode):
     PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160) ## 120 with top-left coordinate system, and starting from the top
     PLAYER_IN_AIR_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
         0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, ## TODO: Remove first zero?
-        0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, ## TODO: Jumps seem random? P.S. They are random
+        0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0,
         0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 
         0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 
         0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
         0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1
     ])
-    PLAYER_SPEED: float = struct.field(pytree_node=False, default=1.0) ## TODO: speed int or float?
-    GRAVITY: float = struct.field(pytree_node=False, default=0.0)
-    JUMP_VELOCITY: float = struct.field(pytree_node=False, default=0.0)
+    PLAYER_SPEED: int = struct.field(pytree_node=False, default=1)
 
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
@@ -138,20 +136,15 @@ class JamesBondState:
 
     player_x: chex.Array
     player_y: chex.Array
-    player_vx: chex.Array
-    player_vy: chex.Array
     player_jumping: chex.Array
     player_falling: chex.Array
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
-    ## player_direction: chex.Array -- Maybe not needed
-    player_direction: chex.Array
     player_bullet_active: chex.Array
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
     player_bullet_y: chex.Array
-    ## player_bullet_vx: chex.Array
-    ## player_bullet_vx: chex.Array
+    bullet_vx: chex.Array
     lives: chex.Array
     score: chex.Array
     step_count: chex.Array
@@ -173,7 +166,6 @@ class JamesBondState:
     satellite_active: chex.Array
     bullet_x: chex.Array
     bullet_y: chex.Array
-    bullet_vx: chex.Array
     bullet_active: chex.Array
     reward_delta: chex.Array
     collision_happened: chex.Array
@@ -191,7 +183,6 @@ class JamesBondObservation:
     diamonds: ObjectObservation
     enemies: ObjectObservation
     bullets: ObjectObservation
-    player_velocity: jnp.ndarray
     lives: jnp.ndarray
     score: jnp.ndarray
     level_progress: jnp.ndarray
@@ -256,20 +247,17 @@ class JaxJamesBond(
         state_key, _ = jax.random.split(key)
 
         state = JamesBondState(
-            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32), ## TODO: float32 or int?
+            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32),
             player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.float32),
-            player_vx=jnp.array(0.0, dtype=jnp.float32),
-            player_vy=jnp.array(0.0, dtype=jnp.float32),
             player_jumping=jnp.array(False, dtype=jnp.bool_),
             player_falling=jnp.array(False, dtype=jnp.bool_),
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
             player_in_air_step=jnp.array(0, dtype=jnp.int32),
-            ## player_direction=jnp.array(1, dtype=jnp.int32), ## TODO: Is there a need for this?
-            player_direction=jnp.array(1, dtype=jnp.int32),
             player_bullet_active=jnp.array(False, dtype=jnp.bool_),
             player_bullet_step=jnp.array(-1, dtype=jnp.int32),
             player_bullet_x=jnp.array(-1, dtype=jnp.int32),
             player_bullet_y=jnp.array(-1, dtype=jnp.int32),
+            bullet_vx=jnp.array(0, dtype=jnp.float32),
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
@@ -278,12 +266,20 @@ class JaxJamesBond(
             diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
-            enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
-            enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
-            enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
+            spawn_diamond_next=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_), ## TODO: Change to correct type
+            ## enemy_x: chex.Array
+            ## enemy_y: chex.Array
+            ## enemy_active: chex.Array
+            ## TODO: Here using helicopter and satellite instead of enemy
+            ## TODO: Change to correct default values
+            helicopter_x=jnp.array(-1, dtype=jnp.int32),
+            helicopter_y=jnp.array(-1, dtype=jnp.int32),
+            helicopter_active=jnp.array(False, dtype=jnp.bool_),
+            satellite_x=jnp.array(-1, dtype=jnp.int32),
+            satellite_y=jnp.array(-1, dtype=jnp.int32),
+            satellite_active=jnp.array(False, dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
-            bullet_vx=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
             reward_delta=jnp.array(0.0, dtype=jnp.float32),
             collision_happened=jnp.array(False, dtype=jnp.bool_),
@@ -347,12 +343,6 @@ class JaxJamesBond(
                 "bullets": spaces.get_object_space(
                     n=self.consts.MAX_BULLETS, screen_size=screen_size
                 ),
-                "player_velocity": spaces.Box(
-                    low=jnp.array([-10.0, -20.0], dtype=jnp.float32),
-                    high=jnp.array([10.0, 20.0], dtype=jnp.float32),
-                    shape=(2,),
-                    dtype=jnp.float32,
-                ),
                 "lives": spaces.Box(
                     low=0,
                     high=self.consts.MAX_LIVES,
@@ -392,7 +382,6 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
-            ## orientation=jnp.where(state.player_direction < 0, 270.0, 90.0),
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
@@ -414,16 +403,13 @@ class JaxJamesBond(
             state.bullet_active,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## TODO: Isn't 90/270 Top/Bottom, which coordinate system are we using?
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0),
         )
         return JamesBondObservation(
             player=player,
             diamonds=diamonds,
             enemies=enemies,
             bullets=bullets,
-            player_velocity=jnp.stack([state.player_vx, state.player_vy]).astype( ## TODO: Does observation need this or can we remove it?
-                jnp.float32
-            ),
             lives=state.lives,
             score=state.score,
             level_progress=state.level_progress,
@@ -481,7 +467,6 @@ class JaxJamesBond(
         player_bullet_step = state.player_bullet_step
         player_bullet_x = state.player_bullet_x
         player_bullet_y = state.player_bullet_y
-        player_direction = state.player_direction
 
         up_pressed = jnp.any(
             jnp.array([
@@ -546,23 +531,10 @@ class JaxJamesBond(
         ### Player Movement Controller
         ###
 
-        ## If vel is needed
-        ## vel_x = jnp.where(
-        ##     right_pressed,
-        ##     self.consts.PLAYER_SPEED,
-        ##     jnp.where(left_pressed, -self.consts.PLAYER_SPEED, 0)
-        ## )
-        ##
-        ## vel_y = ## TODO
-
-        player_direction = jnp.where(
-            left_pressed, -1, jnp.where(right_pressed, 1, player_direction)
-        ).astype(jnp.int32)
-
         player_x = jnp.where(
             right_pressed, 
             jnp.where(
-                state.step_count % 2 == 0, 
+                state.step_count % 2 == 0,
                 jnp.clip(player_x + self.consts.PLAYER_SPEED, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH), ## TODO: Clipping
                 player_x
             ),
@@ -672,7 +644,7 @@ class JaxJamesBond(
             fire_pressed
         )
 
-        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active -- TODO: Hit enemy
+        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active
             player_bullet_step < 30, 
             jnp.where(
                 player_bullet_active,
@@ -718,11 +690,6 @@ class JaxJamesBond(
             player_bullet_active
         )
 
-        ## TODO: Create player_bullet_speed_velocity (if needed)
-
-        player_vx = (player_x - state.player_x).astype(jnp.float32)
-        player_vy = (player_y - state.player_y).astype(jnp.float32)
-
         return state.replace( ## TODO: Use state.replace or output just the values?
             player_x = player_x.astype(jnp.float32),
             player_y = player_y.astype(jnp.float32),
@@ -734,11 +701,6 @@ class JaxJamesBond(
             player_bullet_step = player_bullet_active.astype(jnp.int32),
             player_bullet_x = player_bullet_active.astype(jnp.int32),
             player_bullet_y = player_bullet_active.astype(jnp.int32),
-            ## player_vx = player_vx.astype(jnp.float32), ## TODO: Should we give the speed as well, or just use it for calc?
-            ## player_vy = player_vy.astype(jnp.float32),
-            player_vx = player_vx.astype(jnp.float32),
-            player_vy = player_vy.astype(jnp.float32),
-            player_direction = player_direction,
         )
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
@@ -919,6 +881,7 @@ class JaxJamesBond(
             self.consts.ENEMY_COLLISION_WIDTH,
             self.consts.ENEMY_COLLISION_HEIGHT,
         )
+
         hazard_collision = jnp.any(jnp.logical_and(state.enemy_active, overlaps))
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hazard_collision, can_take_damage)
@@ -953,6 +916,7 @@ class JaxJamesBond(
             self.consts.ENEMY_COLLISION_WIDTH,
             self.consts.ENEMY_COLLISION_HEIGHT,
         )
+        
         active_pairs = jnp.logical_and(
             state.bullet_active[:, None], state.enemy_active[None, :]
         )
@@ -966,7 +930,7 @@ class JaxJamesBond(
             bullet_active=jnp.logical_and(
                 state.bullet_active, jnp.logical_not(bullet_hits)
             ),
-            enemy_active=jnp.logical_and(
+            enemy_active=jnp.logical_and( ## TODO: Some enemies don't deactivate
                 state.enemy_active, jnp.logical_not(enemy_hits)
             ),
             ##player_bullet_x=jnp.where(
