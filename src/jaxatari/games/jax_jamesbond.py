@@ -70,8 +70,9 @@ class JamesBondConstants(struct.PyTreeNode):
 
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=13) ##TODO: There is 13 pixels in the diamond sprite, including the shining thing of diamond 
-    ## ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ## ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    ## TODO: Change / Remove after observation and collision enemey variables have been changed; or else will cause fail tests
+    ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
+    ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
     ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
