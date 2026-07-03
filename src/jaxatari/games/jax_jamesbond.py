@@ -65,6 +65,8 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
     MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
+    MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
+    MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
     MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
@@ -80,6 +82,20 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
+
+    # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
+    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
+    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
+    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
+    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
+    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1)
+    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
+
+    SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
+    SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
+    HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=30)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -185,6 +201,8 @@ class JamesBondObservation:
     player: ObjectObservation
     diamonds: ObjectObservation
     enemies: ObjectObservation
+    ## helicopters: ObjectObservation
+    ## satellites: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -271,19 +289,18 @@ class JaxJamesBond(
             diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
-            spawn_diamond_next=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_), ## TODO: Change to correct type
-            ## TODO: Change / Remove after observation and collision enemey variables have been changed; or else will cause fail tests
-            enemy_x=jnp.array(-1, dtype=jnp.int32),
-            enemy_y=jnp.array(-1, dtype=jnp.int32),
-            enemy_active=jnp.array(False, dtype=jnp.bool_),
+            spawn_diamond_next=jnp.array(True, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional?
+            ## TODO: Change / Remove after observation and collision enemy variables have been changed; or else will cause fail tests
+            enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
+            enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
+            enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
             ## TODO: Here using helicopter and satellite instead of enemy
-            ## TODO: Change to correct default values
-            helicopter_x=jnp.array(-1, dtype=jnp.int32),
-            helicopter_y=jnp.array(-1, dtype=jnp.int32),
-            helicopter_active=jnp.array(False, dtype=jnp.bool_),
-            satellite_x=jnp.array(-1, dtype=jnp.int32),
-            satellite_y=jnp.array(-1, dtype=jnp.int32),
-            satellite_active=jnp.array(False, dtype=jnp.bool_),
+            helicopter_x=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
+            helicopter_y=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
+            helicopter_active=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.bool_),
+            satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
+            satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
+            satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
@@ -352,6 +369,12 @@ class JaxJamesBond(
                 "enemies": spaces.get_object_space(
                     n=self.consts.MAX_ENEMIES, screen_size=screen_size
                 ),
+                ## "helicopters": spaces.get_object_space(
+                ##     n=self.consts.MAX_HELICOPTERS, screen_size=screen_size
+                ## ),
+                ## "satellites": spaces.get_object_space(
+                ##     n=self.consts.MAX_SATELLITES, screen_size=screen_size
+                ## ),
                 "bullets": spaces.get_object_space(
                     n=self.consts.MAX_BULLETS, screen_size=screen_size
                 ),
@@ -409,6 +432,20 @@ class JaxJamesBond(
             self.consts.ENEMY_WIDTH,
             self.consts.ENEMY_HEIGHT,
         )
+        ## helicopters = self._object_group_observation(
+        ##     state.helicopter_x,
+        ##     state.helicopter_y,
+        ##     state.helicopter_active,
+        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
+        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
+        ## )
+        ## satellites = self._object_group_observation(
+        ##     state.satellite_x,
+        ##     state.satellite_y,
+        ##     state.satellite_active,
+        ##     self.consts.SATELLITE_ENEMY_WIDTH,
+        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
+        ## )
         bullets = self._object_group_observation(
             state.bullet_x,
             state.bullet_y,
@@ -424,6 +461,8 @@ class JaxJamesBond(
             ),
             diamonds=diamonds,
             enemies=enemies,
+            ## helicopters=helicopters,
+            ## satellites=satellites,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
@@ -722,36 +761,41 @@ class JaxJamesBond(
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
-        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter, will change if it is wrong
-        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte, will change if it is wrong
+        ## TODO: Checking the speed of objects per frame, will change if it is wrong, if the speed is constant, then move to consts
+        ## TODO: If the speed is not float, then use jnp.where to move it
+        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter
+        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte
 
         # Diamonds (Scroll left)
         next_diamond_x = state.diamond_x - SPEED_R2L ## TODO: Diamond speed, will change if old speed is wrong
+        next_diamond_y = state.diamond_y
         diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
         next_diamond_active = state.diamond_active & diamond_on_screen
 
         # Enemies
         ## Helicopter enemy (Scroll left)
         next_helicopter_x = state.helicopter_x - SPEED_R2L ## TODO: Helicopter enemy speed, will change if old speed is wrong
+        next_helicopter_y = state.helicopter_y
         helicopter_on_screen = next_helicopter_x >= (self.consts.GAME_AREA_MIN_X - self.consts.HELICOPTER_ENEMY_WIDTH)
         next_helicopter_active = state.helicopter_active & helicopter_on_screen
         ## Satellite enemy (Scroll right)
         next_satellite_x = state.satellite_x + SPEED_L2R ## TODO: Satellite enemy speed, will change if old speed is wrong
+        next_satellite_y = state.satellite_y
         satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
         next_satellite_active = state.satellite_active & satellite_on_screen
 
         # === 2. Spawning logic ===
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
-        row_57_empty = ~jnp.any(next_helicopter_active) & ~jnp.any(next_diamond_active)
+        row_57_empty = (~jnp.any(next_helicopter_active)) & (~jnp.any(next_diamond_active))
         # Check whose turn it is to spawn
         spawn_diamond = row_57_empty & state.spawn_diamond_next
-        spawn_helicopter = row_57_empty & ~state.spawn_diamond_next
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next)
         # Flip the turn flag ONLY if a spawn is happening on this frame
         next_spawn_diamond_next = jnp.where(
             row_57_empty,
-            ~state.spawn_diamond.next, ## Swap to the other object for next time
-            state.spawn_diamond.next ## Keep it the same while they are flying
+            ~state.spawn_diamond_next, ## Swap to the other object for next time
+            state.spawn_diamond_next ## Keep it the same while they are flying
         )
         # Diamonds
         available_diamond_idx = jnp.argmin(next_diamond_active) ## Get the first inactive diamond index
@@ -770,7 +814,7 @@ class JaxJamesBond(
         next_diamond_y = next_diamond_y.at[available_diamond_idx].set(
             jnp.where(spawn_diamond,
                       57.0, ## TODO: Diamond spawn height, will change if the number is wrong
-                      state.diamond_y[available_diamond_idx])
+                      next_diamond_y[available_diamond_idx])
         )
 
         # Enemies
@@ -791,7 +835,7 @@ class JaxJamesBond(
         next_helicopter_y = next_helicopter_y.at[available_helicopter_idx].set(
             jnp.where(spawn_helicopter,
                       57.0, ## TODO: Helicopter spawn at the same height as diamond, will change if the number is wrong
-                      state.helicopter_y[available_helicopter_idx])
+                      next_helicopter_y[available_helicopter_idx])
         )
         ## Satellite enemy
         available_satellite_idx = jnp.argmin(next_satellite_active) ## Get the first inactive satellite index
@@ -810,7 +854,7 @@ class JaxJamesBond(
         next_satellite_y = next_satellite_y.at[available_satellite_idx].set(
             jnp.where(can_spawn_satellite,
                       75.0, ## TODO: Satellite spawn height, will change if the number is wrong
-                      state.satellite_y[available_satellite_idx])
+                      next_satellite_y[available_satellite_idx])
         )
 
         return state.replace(
@@ -1099,6 +1143,24 @@ class JamesBondRenderer(JAXGameRenderer):
             self.consts.ENEMY_HEIGHT,
             self.ENEMY_ID,
         )
+        ## raster = self._render_object_group(
+        ##     raster,
+        ##     state.helicopter_x,
+        ##     state.helicopter_y,
+        ##     state.helicopter_active,
+        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
+        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
+        ##     self.ENEMY_ID,
+        ## )
+        ## raster = self._render_object_group(
+        ##     raster,
+        ##     state.satellite_x,
+        ##     state.satellite_y,
+        ##     state.satellite_active,
+        ##     self.consts.SATELLITE_ENEMY_WIDTH,
+        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
+        ##     self.ENEMY_ID,
+        ## )
         return self._render_object_group(
             raster,
             state.bullet_x,
