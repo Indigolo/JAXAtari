@@ -201,6 +201,7 @@ class JamesBondObservation:
     player: ObjectObservation
     diamonds: ObjectObservation
     enemies: ObjectObservation
+    player_velocity: jnp.ndarray
     ## helicopters: ObjectObservation
     ## satellites: ObjectObservation
     bullets: ObjectObservation
