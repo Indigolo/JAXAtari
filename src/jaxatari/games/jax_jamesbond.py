@@ -137,6 +137,8 @@ class JamesBondState:
 
     player_x: chex.Array
     player_y: chex.Array
+    player_vy: chex.Array
+    player_vx: chex.Array
     player_jumping: chex.Array
     player_falling: chex.Array
     player_fast_falling: chex.Array
@@ -250,6 +252,8 @@ class JaxJamesBond(
         state = JamesBondState(
             player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32),
             player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.float32),
+            player_vx=jnp.array(0, dtype=jnp.int32),
+            player_vy=jnp.array(0, dtype=jnp.int32),
             player_jumping=jnp.array(False, dtype=jnp.bool_),
             player_falling=jnp.array(False, dtype=jnp.bool_),
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
@@ -331,13 +335,19 @@ class JaxJamesBond(
     def action_space(self) -> spaces.Discrete:
         return spaces.Discrete(len(self.ACTION_SET))
 
-    def observation_space(self) -> spaces.Dict:
+    def observation_space(self) -> spaces.Dict: # TODO: Test error here?
         screen_size = (self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH)
         return spaces.Dict(
             {
                 "player": spaces.get_object_space(n=None, screen_size=screen_size),
                 "diamonds": spaces.get_object_space(
                     n=self.consts.MAX_DIAMONDS, screen_size=screen_size
+                ),
+                "player_velocity": spaces.Box(
+                    low=jnp.array([-10.0, -20.0], dtype=jnp.float32),
+                    high=jnp.array([10.0, 20.0], dtype=jnp.float32),
+                    shape=(2,),
+                    dtype=jnp.float32,
                 ),
                 "enemies": spaces.get_object_space(
                     n=self.consts.MAX_ENEMIES, screen_size=screen_size
@@ -409,6 +419,9 @@ class JaxJamesBond(
         )
         return JamesBondObservation(
             player=player,
+            player_velocity=jnp.stack([state.player_vx, state.player_vy]).astype( ## TODO: Does observation need this or can we remove it?
+                jnp.float32
+            ),
             diamonds=diamonds,
             enemies=enemies,
             bullets=bullets,
