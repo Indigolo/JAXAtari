@@ -418,6 +418,7 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
@@ -425,6 +426,7 @@ class JaxJamesBond(
             state.diamond_active,
             self.consts.DIAMOND_WIDTH,
             self.consts.DIAMOND_HEIGHT,
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         enemies = self._object_group_observation(
             state.enemy_x,
@@ -432,6 +434,7 @@ class JaxJamesBond(
             state.enemy_active,
             self.consts.ENEMY_WIDTH,
             self.consts.ENEMY_HEIGHT,
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         ## helicopters = self._object_group_observation(
         ##     state.helicopter_x,
