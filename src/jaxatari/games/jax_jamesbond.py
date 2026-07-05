@@ -43,15 +43,16 @@ class JamesBondConstants(struct.PyTreeNode):
     # Atari-style frame dimensions and initial play-area bounds.
     SCREEN_WIDTH: int = struct.field(pytree_node=False, default=160)
     SCREEN_HEIGHT: int = struct.field(pytree_node=False, default=210)
-    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=8) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
-    GAME_AREA_MAX_X: int = struct.field(pytree_node=False, default=152) ## Playable Area: 81 (Coordinate system starting with 1)
-    GAME_AREA_MIN_Y: int = struct.field(pytree_node=False, default=28) ## Playable Area: 123 (Top-left coordinate system); 87 (Bottom-right co-sys)
-    GAME_AREA_MAX_Y: int = struct.field(pytree_node=False, default=196)
+    ## Already has player sprite width/height respected
+    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=4) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
+    GAME_AREA_MAX_X: int = struct.field(pytree_node=False, default=73) ## Playable Area: 81 (Coordinate system starting with 1)
+    GAME_AREA_MIN_Y: int = struct.field(pytree_node=False, default=0) ## Playable Area: 123 (Top-left coordinate system); 87 (Bottom-right co-sys)
+    GAME_AREA_MAX_Y: int = struct.field(pytree_node=False, default=119)
 
     PLAYER_WIDTH: int = struct.field(pytree_node=False, default=8)
     PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=32) ## 30 if starting from the left
-    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=160) ## 120 with top-left coordinate system, and starting from the top
+    PLAYER_INIT_X: int = struct.field(pytree_node=False, default=29) ## 30 if starting with 1
+    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=119) ## 120 if starting with 1
     PLAYER_IN_AIR_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
         0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, ## TODO: Remove first zero?
         0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0,
@@ -60,7 +61,6 @@ class JamesBondConstants(struct.PyTreeNode):
         0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
         0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1
     ])
-    PLAYER_SPEED: int = struct.field(pytree_node=False, default=1)
 
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
@@ -418,7 +418,6 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
@@ -426,7 +425,6 @@ class JaxJamesBond(
             state.diamond_active,
             self.consts.DIAMOND_WIDTH,
             self.consts.DIAMOND_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         enemies = self._object_group_observation(
             state.enemy_x,
@@ -434,7 +432,6 @@ class JaxJamesBond(
             state.enemy_active,
             self.consts.ENEMY_WIDTH,
             self.consts.ENEMY_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0), ## Dummy Check
         )
         ## helicopters = self._object_group_observation(
         ##     state.helicopter_x,
@@ -593,14 +590,14 @@ class JaxJamesBond(
             right_pressed, 
             jnp.where(
                 state.step_count % 2 == 0,
-                jnp.clip(player_x + self.consts.PLAYER_SPEED, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X - self.consts.PLAYER_WIDTH), ## TODO: Clipping
+                jnp.clip(player_x + 1, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X), 
                 player_x
             ),
             jnp.where(
                 left_pressed, 
                 jnp.where(
                     state.step_count % 4 == 0, 
-                    jnp.clip(player_x - self.consts.PLAYER_SPEED, self.consts.GAME_AREA_MIN_X - self.consts.PLAYER_WIDTH / 2, self.consts.GAME_AREA_MAX_X), ## TODO: Clipping
+                    jnp.clip(player_x - 1, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X), 
                     player_x
                 ), 
                 player_x
@@ -662,13 +659,13 @@ class JaxJamesBond(
         
         player_y = jnp.where(
             player_fast_falling,
-            jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Correct this
+            jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
             jnp.where(
                 player_jumping, 
-                player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
+                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
                 jnp.where(
                     player_falling, 
-                    jnp.clip(player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y + self.consts.PLAYER_HEIGHT, self.consts.GAME_AREA_MAX_Y), ## TODO: Maybe change clip params if const system changes
+                    jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
                     player_y
                 )
             )
