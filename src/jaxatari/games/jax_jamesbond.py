@@ -80,8 +80,8 @@ class JamesBondConstants(struct.PyTreeNode):
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
     SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Satellite width is 8 pixels
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
-    BULLET_WIDTH: int = struct.field(pytree_node=False, default=3)
-    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=2)
+    BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
+    BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
     # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
     PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
@@ -90,7 +90,7 @@ class JamesBondConstants(struct.PyTreeNode):
     DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
     ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
     ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1)
+    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: Only player?
     BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
@@ -168,7 +168,7 @@ class JamesBondState:
     score: chex.Array
     step_count: chex.Array
     level_progress: chex.Array
-    hit_cooldown: chex.Array
+    hit_cooldown: chex.Array ## TODO: What for?
     diamond_x: chex.Array
     diamond_y: chex.Array
     diamond_active: chex.Array
@@ -305,11 +305,11 @@ class JaxJamesBond(
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
-            reward_delta=jnp.array(0.0, dtype=jnp.float32),
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
-            collected_diamond=jnp.array(False, dtype=jnp.bool_),
-            hit_enemy=jnp.array(False, dtype=jnp.bool_),
-            fired_bullet=jnp.array(False, dtype=jnp.bool_),
+            reward_delta=jnp.array(0.0, dtype=jnp.float32), ## TODO: What for?
+            collision_happened=jnp.array(False, dtype=jnp.bool_), ## TODO: What for?
+            collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
+            hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
+            fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
             key=state_key,
         )
 
@@ -662,7 +662,7 @@ class JaxJamesBond(
             jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
             jnp.where(
                 player_jumping, 
-                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], ## TODO: Maybe clip if const system changes
+                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], 
                 jnp.where(
                     player_falling, 
                     jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
@@ -725,10 +725,10 @@ class JaxJamesBond(
 
         player_bullet_y = jnp.where(
             jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
-            player_y + 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
+            player_y - 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
             jnp.where(
                 player_bullet_active,
-                player_bullet_y + 2,
+                player_bullet_y - 2,
                 -1
             )
         )
@@ -899,27 +899,26 @@ class JaxJamesBond(
         return self._resolve_player_hazard_collisions(state)
 
     def _resolve_collectible_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Collect active diamonds that overlap the player collision box."""
+        """Collect active diamonds that overlap the player's bullet collision box."""
 
         overlaps = _aabb_overlap(
-            state.player_x,
-            state.player_y,
-            self.consts.PLAYER_COLLISION_WIDTH,
-            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.player_bullet_x,
+            state.player_bullet_y,
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
             state.diamond_x,
             state.diamond_y,
             self.consts.DIAMOND_COLLISION_WIDTH,
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
-        collected = jnp.logical_and(state.diamond_active, overlaps)
-        collected_any = jnp.any(collected)
-        collected_count = jnp.sum(collected.astype(jnp.int32))
+
+        collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
 
         return state.replace(
-            diamond_active=jnp.logical_and(
-                state.diamond_active, jnp.logical_not(collected)
+            diamond_active = jnp.logical_and(
+                state.diamond_active, ~collected
             ),
-            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
+            score=state.score + self.consts.SCORE_DIAMOND,
             reward_delta=state.reward_delta
             + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
             collision_happened=jnp.logical_or(
@@ -946,7 +945,7 @@ class JaxJamesBond(
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hazard_collision, can_take_damage)
 
-        return state.replace(
+        return state.replace( ## TODO: Logic is wrong
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
