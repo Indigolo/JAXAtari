@@ -955,7 +955,7 @@ class JaxJamesBond(
         player_bullet_active = jnp.where(
             jnp.logical_and(
                 state.player_bullet_active, 
-                jnp.logical_not(collected)
+                jnp.logical_not(jnp.any(collected))
             ),
             state.player_bullet_active,
             False
@@ -1022,7 +1022,7 @@ class JaxJamesBond(
         player_bullet_active = jnp.where(
             jnp.logical_and(
                 state.player_bullet_active, 
-                jnp.logical_not(bullet_hits)
+                jnp.logical_not(jnp.any(hits))
             ),
             state.player_bullet_active,
             False
