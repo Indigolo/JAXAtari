@@ -948,6 +948,9 @@ class JaxJamesBond(
         )
 
         collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
+        hits = jnp.any(collected, axis=0)
+        collected_any = jnp.any(hits)
+        collected_count = jnp.sum(hits.astype(jnp.int32)) ## TODO: Is it not only one per frame?
 
         player_bullet_active = jnp.where(
             jnp.logical_and(
@@ -986,7 +989,7 @@ class JaxJamesBond(
             player_bullet_y=player_bullet_y,
             score=state.score + self.consts.SCORE_DIAMOND,
             reward_delta=state.reward_delta
-            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
+            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND, 
             collision_happened=jnp.logical_or(
                 state.collision_happened, collected_any
             ),
@@ -1014,7 +1017,7 @@ class JaxJamesBond(
         bullet_hits = jnp.any(hits, axis=1)
         enemy_hits = jnp.any(hits, axis=0)
         hit_any = jnp.any(enemy_hits)
-        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))
+        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))  ## TODO: Is it not only one per frame?
 
         player_bullet_active = jnp.where(
             jnp.logical_and(
