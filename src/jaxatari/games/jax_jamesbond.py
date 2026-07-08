@@ -764,9 +764,9 @@ class JaxJamesBond(
             player_fast_falling = player_fast_falling.astype(jnp.bool_),
             player_in_air_step = player_in_air_step.astype(jnp.int32),
             player_bullet_active = player_bullet_active.astype(jnp.bool_),
-            player_bullet_step = player_bullet_active.astype(jnp.int32),
-            player_bullet_x = player_bullet_active.astype(jnp.int32),
-            player_bullet_y = player_bullet_active.astype(jnp.int32),
+            player_bullet_step = player_bullet_step.astype(jnp.int32),
+            player_bullet_x = player_bullet_x.astype(jnp.int32),
+            player_bullet_y = player_bullet_y.astype(jnp.int32),
         )
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
@@ -999,7 +999,7 @@ class JaxJamesBond(
             player_bullet_y=player_bullet_y,
             score=state.score + self.consts.SCORE_DIAMOND,
             reward_delta=state.reward_delta
-            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND, 
+            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
             collision_happened=jnp.logical_or(
                 state.collision_happened, collected_any
             ),
