@@ -957,10 +957,14 @@ class JaxJamesBond(
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
 
-        collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
-        hits = jnp.any(collected, axis=0)
-        collected_any = jnp.any(hits)
-        collected_count = jnp.sum(hits.astype(jnp.int32)) ## TODO: Is it not only one per frame?
+        ## Gate per diamond slot: only active diamonds can be hit, and only
+        ## while the bullet itself is active.
+        collected = jnp.logical_and(
+            jnp.logical_and(state.diamond_active, state.player_bullet_active),
+            overlaps,
+        )
+        collected_any = jnp.any(collected)
+        collected_count = jnp.sum(collected.astype(jnp.int32))
 
         player_bullet_active = jnp.where(
             jnp.logical_and(
@@ -997,7 +1001,7 @@ class JaxJamesBond(
             player_bullet_step=player_bullet_step,
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
-            score=state.score + self.consts.SCORE_DIAMOND,
+            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
             reward_delta=state.reward_delta
             + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
             collision_happened=jnp.logical_or(
