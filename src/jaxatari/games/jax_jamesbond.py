@@ -96,6 +96,8 @@ class JamesBondConstants(struct.PyTreeNode):
 
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
+    SCORE_SATELLITE: int = struct.field(pytree_node=False, default=500) ## Manual: poison satellites are worth 500
+
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
@@ -901,18 +903,31 @@ class JaxJamesBond(
     def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
         """Apply one life of damage when the player touches an active enemy."""
 
-        overlaps = _aabb_overlap(
+        helicopter_overlaps = _aabb_overlap(
             state.player_x,
             state.player_y,
             self.consts.PLAYER_COLLISION_WIDTH,
             self.consts.PLAYER_COLLISION_HEIGHT,
-            state.enemy_x,
-            state.enemy_y,
-            self.consts.ENEMY_COLLISION_WIDTH,
-            self.consts.ENEMY_COLLISION_HEIGHT,
+            state.helicopter_x,
+            state.helicopter_y,
+            self.consts.HELICOPTER_ENEMY_WIDTH,
+            self.consts.HELICOPTER_ENEMY_HEIGHT,
+        )
+        satellite_overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.satellite_x,
+            state.satellite_y,
+            self.consts.SATELLITE_ENEMY_WIDTH,
+            self.consts.SATELLITE_ENEMY_HEIGHT,
         )
 
-        hazard_collision = jnp.any(jnp.logical_and(state.enemy_active, overlaps))
+        hazard_collision = jnp.logical_or(
+            jnp.any(jnp.logical_and(state.helicopter_active, helicopter_overlaps)),
+            jnp.any(jnp.logical_and(state.satellite_active, satellite_overlaps)),
+        )
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hazard_collision, can_take_damage)
 
@@ -1001,35 +1016,49 @@ class JaxJamesBond(
         )
 
     def bullet_enemy_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """Deactivate bullets and enemies whose collision boxes overlap."""
+        """Resolve the player bullet against enemies.
 
-        overlaps = _aabb_overlap(
+        Satellites are destroyed for SCORE_SATELLITE points. Helicopters are
+        indestructible in the original game: the bullet is absorbed (stops)
+        but the helicopter stays active and awards no points.
+        """
+
+        satellite_overlaps = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
             self.consts.BULLET_COLLISION_WIDTH,
             self.consts.BULLET_COLLISION_HEIGHT,
-            state.enemy_x[None, :],
-            state.enemy_y[None, :],
-            self.consts.ENEMY_COLLISION_WIDTH,
-            self.consts.ENEMY_COLLISION_HEIGHT,
+            state.satellite_x,
+            state.satellite_y,
+            self.consts.SATELLITE_ENEMY_WIDTH,
+            self.consts.SATELLITE_ENEMY_HEIGHT,
         )
-        
-        active_pairs = jnp.logical_and(
-            state.bullet_active[:, None], state.enemy_active[None, :]
+        satellite_hits = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, state.player_bullet_active),
+            satellite_overlaps,
         )
-        hits = jnp.logical_and(active_pairs, overlaps)
-        bullet_hits = jnp.any(hits, axis=1)
-        enemy_hits = jnp.any(hits, axis=0)
-        hit_any = jnp.any(enemy_hits)
-        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))  ## TODO: Is it not only one per frame?
 
-        player_bullet_active = jnp.where(
-            jnp.logical_and(
-                state.player_bullet_active, 
-                jnp.logical_not(jnp.any(hits))
-            ),
-            state.player_bullet_active,
-            False
+        helicopter_overlaps = _aabb_overlap(
+            state.player_bullet_x,
+            state.player_bullet_y,
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
+            state.helicopter_x,
+            state.helicopter_y,
+            self.consts.HELICOPTER_ENEMY_WIDTH,
+            self.consts.HELICOPTER_ENEMY_HEIGHT,
+        )
+        helicopter_blocks = jnp.logical_and(
+            jnp.logical_and(state.helicopter_active, state.player_bullet_active),
+            helicopter_overlaps,
+        )
+
+        hit_any = jnp.any(satellite_hits)
+        hit_count = jnp.sum(satellite_hits.astype(jnp.int32))
+        bullet_stopped = jnp.logical_or(hit_any, jnp.any(helicopter_blocks))
+
+        player_bullet_active = jnp.logical_and(
+            state.player_bullet_active, jnp.logical_not(bullet_stopped)
         )
 
         player_bullet_x = jnp.where(
@@ -1051,17 +1080,14 @@ class JaxJamesBond(
         )
 
         return state.replace(
-            bullet_active=jnp.logical_and(
-                state.bullet_active, jnp.logical_not(bullet_hits)
-            ),
-            enemy_active=jnp.logical_and( ## TODO: Some enemies don't deactivate
-                state.enemy_active, jnp.logical_not(enemy_hits)
+            satellite_active=jnp.logical_and(
+                state.satellite_active, jnp.logical_not(satellite_hits)
             ),
             player_bullet_active=player_bullet_active,
             player_bullet_step=player_bullet_step,
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
-            score=state.score + hit_count * self.consts.SCORE_ENEMY,
+            score=state.score + hit_count * self.consts.SCORE_SATELLITE,
             reward_delta=state.reward_delta
             + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
             collision_happened=jnp.logical_or(state.collision_happened, hit_any),
