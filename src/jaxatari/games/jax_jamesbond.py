@@ -96,7 +96,7 @@ class JamesBondConstants(struct.PyTreeNode):
 
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
-    HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=30)
+    HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -916,7 +916,7 @@ class JaxJamesBond(
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hazard_collision, can_take_damage)
 
-        return state.replace( ## TODO: Logic is wrong
+        return state.replace(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
