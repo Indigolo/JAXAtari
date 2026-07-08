@@ -98,6 +98,11 @@ class JamesBondConstants(struct.PyTreeNode):
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
     SCORE_SATELLITE: int = struct.field(pytree_node=False, default=500) ## Manual: poison satellites are worth 500
 
+    ## Helicopter bombs (enemy fire), stored in the generic bullet_* arrays.
+    ENEMY_BOMB_DROP_PERIOD: int = struct.field(pytree_node=False, default=60) ## Frames between drops
+    ENEMY_BOMB_FALL_SPEED: float = struct.field(pytree_node=False, default=1.0)
+    ENEMY_BOMB_DRIFT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Keeps world-scroll momentum (SPEED_R2L)
+
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
@@ -338,6 +343,7 @@ class JaxJamesBond(
         )
         state = self._step_player(state, atari_action)
         state = self._update_objects_placeholder(state)
+        state = self._update_enemy_bombs(state)
         state = self._check_collisions_placeholder(state)
 
         _, next_key = jax.random.split(state.key)
@@ -874,6 +880,54 @@ class JaxJamesBond(
             spawn_diamond_next=next_spawn_diamond_next
         )
 
+    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
+        """Move falling helicopter bombs and periodically drop new ones.
+
+        Bombs live in the generic bullet_* arrays. They fall straight down
+        while keeping the world-scroll drift, and despawn once they are
+        fully below the player's row.
+        """
+
+        # === 1. Move active bombs, despawn below the play area ===
+        next_bomb_x = state.bullet_x - self.consts.ENEMY_BOMB_DRIFT_SPEED
+        next_bomb_y = state.bullet_y + self.consts.ENEMY_BOMB_FALL_SPEED
+        bomb_on_screen = next_bomb_y <= (
+            self.consts.GAME_AREA_MAX_Y + self.consts.PLAYER_COLLISION_HEIGHT
+        )
+        next_bomb_active = jnp.logical_and(state.bullet_active, bomb_on_screen)
+
+        # === 2. Periodic drop from the first active helicopter ===
+        drop_frame = (state.step_count % self.consts.ENEMY_BOMB_DROP_PERIOD) == 0
+        shooter_idx = jnp.argmax(state.helicopter_active)
+        has_shooter = jnp.any(state.helicopter_active)
+        free_slot = jnp.argmax(jnp.logical_not(next_bomb_active))
+        has_free_slot = jnp.any(jnp.logical_not(next_bomb_active))
+        do_drop = jnp.logical_and(
+            jnp.logical_and(drop_frame, has_shooter), has_free_slot
+        )
+
+        drop_x = (
+            state.helicopter_x[shooter_idx]
+            + self.consts.HELICOPTER_ENEMY_WIDTH / 2
+        )
+        drop_y = state.helicopter_y[shooter_idx] + self.consts.HELICOPTER_ENEMY_HEIGHT
+
+        next_bomb_x = next_bomb_x.at[free_slot].set(
+            jnp.where(do_drop, drop_x, next_bomb_x[free_slot])
+        )
+        next_bomb_y = next_bomb_y.at[free_slot].set(
+            jnp.where(do_drop, drop_y, next_bomb_y[free_slot])
+        )
+        next_bomb_active = next_bomb_active.at[free_slot].set(
+            jnp.where(do_drop, True, next_bomb_active[free_slot])
+        )
+
+        return state.replace(
+            bullet_x=next_bomb_x,
+            bullet_y=next_bomb_y,
+            bullet_active=next_bomb_active,
+        )
+
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         state = state.replace(
@@ -898,7 +952,47 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
+        state = self._resolve_bomb_player_collisions(state)
         return self._resolve_player_hazard_collisions(state)
+
+    def _resolve_bomb_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when a helicopter bomb hits the player.
+
+        The bomb always detonates (deactivates) on contact; the life is only
+        lost when the hit cooldown has expired, mirroring the hazard rule.
+        """
+
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.bullet_x,
+            state.bullet_y,
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
+        )
+        bomb_hits = jnp.logical_and(state.bullet_active, overlaps)
+        hit_any = jnp.any(bomb_hits)
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(hit_any, can_take_damage)
+
+        return state.replace(
+            bullet_active=jnp.logical_and(
+                state.bullet_active, jnp.logical_not(bomb_hits)
+            ),
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            reward_delta=state.reward_delta
+            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
+            collision_happened=jnp.logical_or(state.collision_happened, hit_any),
+        )
 
     def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
         """Apply one life of damage when the player touches an active enemy."""
