@@ -11,6 +11,7 @@ from typing import Tuple
 import chex
 import jax
 import jax.numpy as jnp
+from jax import lax
 from flax import struct
 
 import jaxatari.spaces as spaces
@@ -894,38 +895,8 @@ class JaxJamesBond(
     def _resolve_collisions(self, state: JamesBondState) -> JamesBondState:
         """Run all collision systems after movement and object updates."""
 
-        state = self._resolve_collectible_collisions(state)
-        state = self._resolve_bullet_enemy_collisions(state)
+        state = self._resolve_player_bullet_collisions(state)
         return self._resolve_player_hazard_collisions(state)
-
-    def _resolve_collectible_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Collect active diamonds that overlap the player's bullet collision box."""
-
-        overlaps = _aabb_overlap(
-            state.player_bullet_x,
-            state.player_bullet_y,
-            self.consts.BULLET_COLLISION_WIDTH,
-            self.consts.BULLET_COLLISION_HEIGHT,
-            state.diamond_x,
-            state.diamond_y,
-            self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT,
-        )
-
-        collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
-
-        return state.replace(
-            diamond_active = jnp.logical_and(
-                state.diamond_active, ~collected
-            ),
-            score=state.score + self.consts.SCORE_DIAMOND,
-            reward_delta=state.reward_delta
-            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
-            collision_happened=jnp.logical_or(
-                state.collision_happened, collected_any
-            ),
-            collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
-        )
 
     def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
         """Apply one life of damage when the player touches an active enemy."""
@@ -961,13 +932,73 @@ class JaxJamesBond(
             ),
             hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
         )
+    
+    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
+        """Collect active diamonds that overlap the player's bullet collision box."""
 
-    def _resolve_bullet_enemy_collisions(self, state: JamesBondState) -> JamesBondState:
+        overlaps = _aabb_overlap(
+            state.player_bullet_x,
+            state.player_bullet_y,
+            self.consts.BULLET_COLLISION_WIDTH,
+            self.consts.BULLET_COLLISION_HEIGHT,
+            state.diamond_x,
+            state.diamond_y,
+            self.consts.DIAMOND_COLLISION_WIDTH,
+            self.consts.DIAMOND_COLLISION_HEIGHT,
+        )
+
+        collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
+
+        player_bullet_active = jnp.where(
+            jnp.logical_and(
+                state.player_bullet_active, 
+                jnp.logical_not(collected)
+            ),
+            state.player_bullet_active,
+            False
+        )
+
+        player_bullet_x = jnp.where(
+            player_bullet_active,
+            state.player_bullet_x,
+            -1
+        )
+
+        player_bullet_y = jnp.where(
+            player_bullet_active,
+            state.player_bullet_y,
+            -1
+        )
+
+        player_bullet_step = jnp.where(
+            player_bullet_active,
+            state.player_bullet_step,
+            -1
+        )
+
+        return state.replace(
+            diamond_active = jnp.logical_and(
+                state.diamond_active, ~collected
+            ),
+            player_bullet_active=player_bullet_active,
+            player_bullet_step=player_bullet_step,
+            player_bullet_x=player_bullet_x,
+            player_bullet_y=player_bullet_y,
+            score=state.score + self.consts.SCORE_DIAMOND,
+            reward_delta=state.reward_delta
+            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, collected_any
+            ),
+            collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
+        )
+
+    def bullet_enemy_collisions_logic(self, state: JamesBondState) -> JamesBondState:
         """Deactivate bullets and enemies whose collision boxes overlap."""
 
         overlaps = _aabb_overlap(
-            state.bullet_x[:, None],
-            state.bullet_y[:, None],
+            state.player_bullet_x[:, None],
+            state.player_bullet_y[:, None],
             self.consts.BULLET_COLLISION_WIDTH,
             self.consts.BULLET_COLLISION_HEIGHT,
             state.enemy_x[None, :],
@@ -985,6 +1016,33 @@ class JaxJamesBond(
         hit_any = jnp.any(enemy_hits)
         hit_count = jnp.sum(enemy_hits.astype(jnp.int32))
 
+        player_bullet_active = jnp.where(
+            jnp.logical_and(
+                state.player_bullet_active, 
+                jnp.logical_not(bullet_hits)
+            ),
+            state.player_bullet_active,
+            False
+        )
+
+        player_bullet_x = jnp.where(
+            player_bullet_active,
+            state.player_bullet_x,
+            -1
+        )
+
+        player_bullet_y = jnp.where(
+            player_bullet_active,
+            state.player_bullet_y,
+            -1
+        )
+
+        player_bullet_step = jnp.where(
+            player_bullet_active,
+            state.player_bullet_step,
+            -1
+        )
+
         return state.replace(
             bullet_active=jnp.logical_and(
                 state.bullet_active, jnp.logical_not(bullet_hits)
@@ -992,36 +1050,39 @@ class JaxJamesBond(
             enemy_active=jnp.logical_and( ## TODO: Some enemies don't deactivate
                 state.enemy_active, jnp.logical_not(enemy_hits)
             ),
-            ##player_bullet_x=jnp.where(
-            ##    jnp.logical_and(
-            ##        state.bullet_active, 
-            ##        jnp.logical_not(bullet_hits)
-            ##    ),
-            ##    state.player_bullet_x,
-            ##    -1
-            ##),
-            ##player_bullet_y=jnp.where(
-            ##    jnp.logical_and(
-            ##        state.bullet_active, 
-            ##        jnp.logical_not(bullet_hits)
-            ##    ),
-            ##    state.player_bullet_y,
-            ##    -1
-            ##),
-            ##player_bullet_step=jnp.where(
-            ##    jnp.logical_and(
-            ##        state.bullet_active, 
-            ##        jnp.logical_not(bullet_hits)
-            ##    ),
-            ##    state.player_bullet_step,
-            ##    -1
-            ##),
+            player_bullet_active=player_bullet_active,
+            player_bullet_step=player_bullet_step,
+            player_bullet_x=player_bullet_x,
+            player_bullet_y=player_bullet_y,
             score=state.score + hit_count * self.consts.SCORE_ENEMY,
             reward_delta=state.reward_delta
             + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
             collision_happened=jnp.logical_or(state.collision_happened, hit_any),
             hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
         )
+    
+    def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
+        check_collisions = jnp.where(
+            state.player_bullet_active,
+            True,
+            False
+        )
+        
+        new_state = lax.cond(
+            check_collisions,
+            self.collectible_collisions_logic,
+            lambda s: s,
+            state
+        )
+
+        new_state = lax.cond(
+            check_collisions,
+            self.bullet_enemy_collisions_logic, ## TODO: Do we need this? Enemies don't get hit right?
+            lambda s: s,
+            new_state
+        )
+
+        return new_state
 
     def _get_reward(
         self, previous_state: JamesBondState, state: JamesBondState
