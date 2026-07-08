@@ -1000,8 +1000,8 @@ class JaxJamesBond(
         """Deactivate bullets and enemies whose collision boxes overlap."""
 
         overlaps = _aabb_overlap(
-            state.player_bullet_x[:, None],
-            state.player_bullet_y[:, None],
+            state.player_bullet_x,
+            state.player_bullet_y,
             self.consts.BULLET_COLLISION_WIDTH,
             self.consts.BULLET_COLLISION_HEIGHT,
             state.enemy_x[None, :],
