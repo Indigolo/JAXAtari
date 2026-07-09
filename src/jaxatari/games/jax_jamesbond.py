@@ -419,6 +419,9 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
+            orientation=jnp.array(0.0, dtype=jnp.float32),
+            state=jnp.array(0, dtype=jnp.int32),
+            visual_id=jnp.array(0, dtype=jnp.int32),
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
