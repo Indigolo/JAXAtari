@@ -482,6 +482,9 @@ class JaxJamesBond(
     ) -> ObjectObservation:
         """Convert fixed-size object arrays plus masks into ObjectObservation."""
 
+        if orientation is None: ## TODO: Maybe remove if not needed
+            orientation = jnp.zeros_like(x, dtype=jnp.float32)
+
         return ObjectObservation.create(
             x=x,
             y=y,
