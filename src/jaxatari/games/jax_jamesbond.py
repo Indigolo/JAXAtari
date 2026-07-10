@@ -769,25 +769,46 @@ class JaxJamesBond(
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
-        ## TODO: Checking the speed of objects per frame, will change if it is wrong, if the speed is constant, then move to consts
-        ## TODO: If the speed is not float, then use jnp.where to move it
-        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter
-        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte
 
         # Diamonds (Scroll left)
-        next_diamond_x = state.diamond_x - SPEED_R2L ## TODO: Diamond speed, will change if old speed is wrong
+        ## Diamond speed, here is 0.5 pixels per frame
+        next_diamond_x = jnp.where(
+            state.step_count % 2 == 0,
+            state.diamond_x - 1,
+            state.diamond_x
+        )
         next_diamond_y = state.diamond_y
         diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
         next_diamond_active = state.diamond_active & diamond_on_screen
 
         # Enemies
         ## Helicopter enemy (Scroll left)
-        next_helicopter_x = state.helicopter_x - SPEED_R2L ## TODO: Helicopter enemy speed, will change if old speed is wrong
+        ## 1. Determine which speed zone the helicopter is currently in
+        in_slow_mode = (state.helicopter_x <= 96) & (state.helicopter_x > 63)
+        ## 2. The speed of helicopter is 0.6 pixels per frame in normal mode, and 0.375 pixels per frame in slow mode
+        move_normal = (state.step_count % 5 == 0) | (state.step_count % 5 == 2) | (state.step_count % 5 == 4)
+        move_slow = (state.step_count % 8 == 1) | (state.step_count % 8 == 4) | (state.step_count % 8 == 7)
+        move_helicopter = jnp.where(
+            in_slow_mode,
+            move_slow,
+            move_normal
+        )
+        next_helicopter_x = jnp.where(
+            move_helicopter,
+            state.helicopter_x - 1,
+            state.helicopter_x
+        )
         next_helicopter_y = state.helicopter_y
         helicopter_on_screen = next_helicopter_x >= (self.consts.GAME_AREA_MIN_X - self.consts.HELICOPTER_ENEMY_WIDTH)
         next_helicopter_active = state.helicopter_active & helicopter_on_screen
+        
         ## Satellite enemy (Scroll right)
-        next_satellite_x = state.satellite_x + SPEED_L2R ## TODO: Satellite enemy speed, will change if old speed is wrong
+        ## Satellite enemy speed, here is 0.8 pixels per frame
+        next_satellite_x = jnp.where(
+            state.step_count % 5 != 4,
+            state.satellite_x + 1,
+            state.satellite_x
+        )
         next_satellite_y = state.satellite_y
         satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
         next_satellite_active = state.satellite_active & satellite_on_screen
