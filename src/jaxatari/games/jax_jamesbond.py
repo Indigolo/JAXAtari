@@ -419,6 +419,9 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
+            orientation=jnp.array(0.0, dtype=jnp.float32),
+            state=jnp.array(0, dtype=jnp.int32),
+            visual_id=jnp.array(0, dtype=jnp.int32),
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
@@ -454,11 +457,7 @@ class JaxJamesBond(
             state.bullet_active,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            ## bullet_vx is a scalar, so broadcast the orientation to one value
-            ## per bullet slot or the observation loses 3 features vs the space.
-            orientation=jnp.broadcast_to(
-                jnp.where(state.bullet_vx < 0, 270.0, 90.0), state.bullet_x.shape
-            ),
+            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0),
         )
         return JamesBondObservation(
             player=player,
@@ -486,15 +485,12 @@ class JaxJamesBond(
     ) -> ObjectObservation:
         """Convert fixed-size object arrays plus masks into ObjectObservation."""
 
-        ## Inactive objects keep drifting in _update_objects_placeholder, so
-        ## their stale coordinates can leave the screen bounds. Zero them out
-        ## and clamp active ones so the observation stays inside its space.
-        safe_x = jnp.where(active, jnp.clip(x, 0, self.consts.SCREEN_WIDTH), 0.0)
-        safe_y = jnp.where(active, jnp.clip(y, 0, self.consts.SCREEN_HEIGHT), 0.0)
+        if orientation is None: ## TODO: Maybe remove if not needed
+            orientation = jnp.zeros_like(x, dtype=jnp.float32)
 
         return ObjectObservation.create(
-            x=safe_x,
-            y=safe_y,
+            x=x,
+            y=y,
             width=jnp.full(x.shape, width, dtype=jnp.int32),
             height=jnp.full(y.shape, height, dtype=jnp.int32),
             active=active,
