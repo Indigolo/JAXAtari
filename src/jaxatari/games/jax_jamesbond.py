@@ -932,7 +932,7 @@ class JaxJamesBond(
                 state.hit_cooldown,
             ),
             reward_delta=state.reward_delta
-            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
+            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE, ## TODO: There are 5 lives in ALE
             collision_happened=jnp.logical_or(
                 state.collision_happened, hazard_collision
             ),
@@ -1002,8 +1002,10 @@ class JaxJamesBond(
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
+    ## TODO: Maybe use for the 2nd stage
+    """
     def bullet_enemy_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """Deactivate bullets and enemies whose collision boxes overlap."""
+        """"Deactivate bullets and enemies whose collision boxes overlap.""""
 
         overlaps = _aabb_overlap(
             state.player_bullet_x,
@@ -1069,6 +1071,7 @@ class JaxJamesBond(
             collision_happened=jnp.logical_or(state.collision_happened, hit_any),
             hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
         )
+    """
     
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
         check_collisions = jnp.where(
@@ -1084,12 +1087,14 @@ class JaxJamesBond(
             state
         )
 
+        """
         new_state = lax.cond(
             check_collisions,
             self.bullet_enemy_collisions_logic, ## TODO: Do we need this? Enemies don't get hit right?
             lambda s: s,
             new_state
         )
+        """
 
         return new_state
 
