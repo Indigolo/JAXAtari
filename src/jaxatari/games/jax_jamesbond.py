@@ -4,6 +4,7 @@ This file intentionally defines only the shared environment contract and minimal
 placeholder behavior. Gameplay systems such as object spawning, collisions,
 scoring, lives, and sprite-accurate rendering are left for follow-up work.
 """
+import os
 
 from functools import partial
 from typing import Tuple
@@ -20,6 +21,44 @@ from jaxatari.environment import JaxEnvironment, ObjectObservation
 from jaxatari.renderers import JAXGameRenderer
 from jaxatari.rendering import jax_rendering_utils as render_utils
 
+def get_default_asset_config() -> tuple:
+        # 1. Define the game-specific asset manifest in a clear, declarative way.
+        asset_config = [
+            {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Need to create background all black sprite?
+            {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
+            {'name': 'car', 'type': 'single', 'file': 'car.npy'},
+            {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
+            {
+                'name': 'helicopter', 'type': 'group',
+                'files': ['helicopter_1.npy', 'helicopter_2.npy']
+            },
+            {
+                'name': 'helicopter_melee', 'type': 'group',
+                'files': ['helicopter_shot_1.npy', 'helicopter_shot_2.npy'] ## TODO: Add others
+            },
+            {
+                'name': 'pit', 'type': 'group',
+                'files': ['fire_pit_1.npy', 'fire_pit_2.npy']
+            },
+            {
+                'name': 'diamond', 'type': 'group',
+                'files': ['diamond_1.npy', 'diamond_2.npy']
+            },
+            {
+                'name': 'stars', 'type': 'group', 
+                'files': ['stars_1.npy', 'stars_2.npy']
+             },
+            {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
+            {
+                'name': 'score_digits', 'type': 'digits',
+                'pattern': 'score_{}.npy' ## TODO: How does it work?
+            },
+            {
+                'name': 'bullet', 'type': 'single', ## TODO: All bullets the same sprite?
+                'file': 'bullet.npy'
+            }
+        ]
+        return asset_config
 
 def _aabb_overlap(
     ax: chex.Array,
@@ -104,6 +143,8 @@ class JamesBondConstants(struct.PyTreeNode):
     REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0)
     REWARD_LOST_LIFE: float = struct.field(pytree_node=False, default=-1.0)
 
+    ASSET_CONFIG: tuple = struct.field(pytree_node=False, default_factory=get_default_asset_config)
+
     ACTION_MEANINGS: Tuple[str, ...] = struct.field( ## TODO: What is this for?
         pytree_node=False,
         default=(
@@ -127,7 +168,8 @@ class JamesBondConstants(struct.PyTreeNode):
             "DOWNLEFTFIRE"
             ),
     )
-
+    
+    ## TODO: Change to correct ones
     BACKGROUND_COLOR: Tuple[int, int, int] = struct.field(
         pytree_node=False, default=(8, 14, 32)
     )
@@ -1143,16 +1185,31 @@ class JamesBondRenderer(JAXGameRenderer):
         config: render_utils.RendererConfig = None,
     ):
         self.consts = consts or JamesBondConstants()
+        super().__init__(self.consts)
+
         if config is None:
             config = render_utils.RendererConfig(
                 game_dimensions=(self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH),
                 channels=3,
                 downscale=None,
             )
-        super().__init__(self.consts, config)
-        self.config = config
+        else:
+            self.config = config
+
         self.jr = render_utils.JaxRenderingUtils(self.config)
 
+        sprite_path = os.path.join(render_utils.get_base_sprite_dir(), "jamesbond")
+
+        (
+            self.PALETTE,
+            self.SHAPE_MASKS,
+            self.BACKGROUND,
+            self.COLOR_TO_ID,
+            self.FLIP_OFFSETS
+        ) = self.jr.load_and_setup_assets(self.consts.ASSET_CONFIG, sprite_path)
+
+        
+        ## TODO: Delete this after revamp
         self.PALETTE = jnp.array(
             [
                 self.consts.BACKGROUND_COLOR,
