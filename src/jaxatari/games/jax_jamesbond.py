@@ -216,6 +216,9 @@ class JamesBondState:
     diamond_y: chex.Array
     diamond_active: chex.Array
     spawn_diamond_next: chex.Array
+    pit_x: chex.Array
+    pit_y: chex.Array
+    pit_active: chex.Array
     enemy_x: chex.Array
     enemy_y: chex.Array
     enemy_active: chex.Array
@@ -312,7 +315,7 @@ class JaxJamesBond(
         state_key, _ = jax.random.split(key)
 
         state = JamesBondState(
-            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32),
+            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32), ## TODO: Change all float32 pos-s to int32
             player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.float32),
             player_vx=jnp.array(0, dtype=jnp.int32),
             player_vy=jnp.array(0, dtype=jnp.int32),
@@ -330,9 +333,12 @@ class JaxJamesBond(
             step_count=jnp.array(0, dtype=jnp.int32),
             level_progress=jnp.array(0, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
-            diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
+            diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32), ## TODO: Change max diamonds to 1? Also others...
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
+            pit_x=jnp.array(0, dtype=jnp.int32),
+            pit_y=jnp.array(0, dtype=jnp.int32),
+            pit_active=jnp.array(False, dtype=jnp.bool_),
             spawn_diamond_next=jnp.array(True, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional?
             ## TODO: Change / Remove after observation and collision enemy variables have been changed; or else will cause fail tests
             enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
@@ -807,7 +813,7 @@ class JaxJamesBond(
             player_bullet_y = player_bullet_active.astype(jnp.int32),
         )
 
-    def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
+    def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: Implement fire pit
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
@@ -1207,7 +1213,6 @@ class JamesBondRenderer(JAXGameRenderer):
             self.COLOR_TO_ID,
             self.FLIP_OFFSETS
         ) = self.jr.load_and_setup_assets(self.consts.ASSET_CONFIG, sprite_path)
-
         
         ## TODO: Delete this after revamp
         self.PALETTE = jnp.array(
@@ -1261,19 +1266,81 @@ class JamesBondRenderer(JAXGameRenderer):
         )
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
-    def _render_player(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the player placeholder rectangle."""
+    def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement death animation
+        """Draw the player car."""
 
-        position = jnp.stack(
-            [
-                jnp.round(state.player_x).astype(jnp.int32),
-                jnp.round(state.player_y).astype(jnp.int32),
-            ]
-        )[None, :] ## TODO: Why this definiton and not just 2 arrays?
-        size = jnp.array(
-            [[self.consts.PLAYER_WIDTH, self.consts.PLAYER_HEIGHT]], dtype=jnp.int32
+        return self.jr.render_at_clipped(
+            raster, 
+            state.player_x, 
+            state.player_y, 
+            self.SHAPE_MASKS['car']
         )
-        return self.jr.draw_rects(raster, position, size, self.PLAYER_ID)
+    
+    def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the diamond."""
+
+        sprite_idx = jnp.where(
+            state.step_count % 2 == 0,
+            0,
+            1
+        )
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r, 
+            state.diamond_x, 
+            state.diamond_y, 
+            self.SHAPE_MASKS['diamond'][sprite_idx],
+        )
+
+        return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
+    
+    def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
+        """Draw the fire pit."""
+
+        sprite_idx = jnp.where(
+            state.step_count % 2 == 0,
+            0,
+            1
+        )
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r, 
+            state.pit_x, 
+            state.pit_y, 
+            self.SHAPE_MASKS['pit'][sprite_idx],
+        )
+
+        return jax.lax.cond(state.pit_active, draw_fn, lambda r: r, raster)
+    
+    def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
+        """Draw the helicopter."""
+
+        sprite_idx = jnp.where(
+            state.step_count % 2 == 0,
+            0,
+            1
+        )
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r, 
+            state.helicopter_x, 
+            state.helicopter_y, 
+            self.SHAPE_MASKS['helicopter'][sprite_idx],
+        )
+
+        return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
+    
+    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation
+        """Draw the satellite."""
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r, 
+            state.satellite_x, 
+            state.satellite_y, 
+            self.SHAPE_MASKS['satellite'],
+        )
+
+        return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
 
     def _render_objects(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw any active placeholder object rectangles."""
