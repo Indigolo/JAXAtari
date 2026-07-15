@@ -22,7 +22,6 @@ from jaxatari.renderers import JAXGameRenderer
 from jaxatari.rendering import jax_rendering_utils as render_utils
 
 def get_default_asset_config() -> tuple:
-        # 1. Define the game-specific asset manifest in a clear, declarative way.
         asset_config = [
             {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Need to create background all black sprite?
             {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
@@ -48,10 +47,12 @@ def get_default_asset_config() -> tuple:
                 'name': 'stars', 'type': 'group', 
                 'files': ['stars_1.npy', 'stars_2.npy']
              },
+
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
+            
             {
                 'name': 'score_digits', 'type': 'digits',
-                'pattern': 'score_{}.npy' ## TODO: How does it work?
+                'pattern': 'score_{}.npy' ## TODO: Add digits 6-9
             },
             {
                 'name': 'bullet', 'type': 'single', ## TODO: All bullets the same sprite?
@@ -168,26 +169,6 @@ class JamesBondConstants(struct.PyTreeNode):
             "DOWNLEFTFIRE"
             ),
     )
-    
-    ## TODO: Change to correct ones
-    BACKGROUND_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(8, 14, 32)
-    )
-    PLAY_AREA_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(20, 42, 66)
-    )
-    PLAYER_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(236, 236, 236)
-    )
-    DIAMOND_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(0, 216, 255)
-    )
-    ENEMY_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(220, 64, 64)
-    )
-    BULLET_COLOR: Tuple[int, int, int] = struct.field(
-        pytree_node=False, default=(250, 220, 72)
-    )
 
 
 @struct.dataclass
@@ -202,7 +183,7 @@ class JamesBondState:
     player_falling: chex.Array
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
-    player_bullet_active: chex.Array
+    player_bullet_active: chex.Array ## TODO: Maybe think about every bullet as bullet with different and direction (and speed?)?
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
     player_bullet_y: chex.Array
@@ -1213,39 +1194,29 @@ class JamesBondRenderer(JAXGameRenderer):
             self.COLOR_TO_ID,
             self.FLIP_OFFSETS
         ) = self.jr.load_and_setup_assets(self.consts.ASSET_CONFIG, sprite_path)
-        
-        ## TODO: Delete this after revamp
-        self.PALETTE = jnp.array(
-            [
-                self.consts.BACKGROUND_COLOR,
-                self.consts.PLAY_AREA_COLOR,
-                self.consts.PLAYER_COLOR,
-                self.consts.DIAMOND_COLOR,
-                self.consts.ENEMY_COLOR,
-                self.consts.BULLET_COLOR,
-            ],
-            dtype=jnp.uint8,
-        )
-        self.BACKGROUND_ID = 0
-        self.PLAY_AREA_ID = 1
-        self.PLAYER_ID = 2
-        self.DIAMOND_ID = 3
-        self.ENEMY_ID = 4
-        self.BULLET_ID = 5
-        self.BACKGROUND = jnp.full(
-            (self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH),
-            self.BACKGROUND_ID,
-            dtype=jnp.uint8,
-        )
+
 
     @partial(jax.jit, static_argnums=(0,))
     def render(self, state: JamesBondState) -> jnp.ndarray:
         """Render a simple background, inactive object slots, and player box."""
 
-        raster = self.jr.create_object_raster(self.BACKGROUND)
-        raster = self._render_background(raster)
-        raster = self._render_objects(raster, state)
-        raster = self._render_player(raster, state)
+        raster = self.jr.create_object_raster(self.BACKGROUND) ## TODO: Render ground, maybe as part of background?
+
+        raster = self._render_car(raster, state)
+        raster = self._render_diamond(raster, state)
+        raster = self._render_pit(raster, state)
+        raster = self._render_helicopter(raster, state)
+        raster = self._render_satellite(raster, state)
+
+        raster = self._render_bullets(raster, state)
+
+        ## Render life counter
+        raster = self.jr.render_indicator(raster, 9, 184, state.lives, self.SHAPE_MASKS['life'], 16, 3) ## TODO: Maybe 5 like in ALE?
+        
+        ## Render Score counter
+        score_digits = self.jr.int_to_digits(state.score, 4) ## TODO: Max score 4 digits?
+        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 4) ## TODO: Position offset per digit?
+
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray:
@@ -1294,7 +1265,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
     
-    def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
+    def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the fire pit."""
 
         sprite_idx = jnp.where(
@@ -1341,76 +1312,28 @@ class JamesBondRenderer(JAXGameRenderer):
         )
 
         return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
+    
+    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
+        """Draw all bullets."""
+        
+        active_bullets = jnp.array([
+            state.player_bullet_active, ## TODO: Add helicopter and satellite bullets.
+        ])
 
-    def _render_objects(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw any active placeholder object rectangles."""
+        bullet_positions = jnp.vstack([
+            jnp.stack([state.player_bullet_x, state.player_bullet_y]), ## TODO: Add helicopter and satellite bullets.
+        ])
 
-        raster = self._render_object_group(
-            raster,
-            state.diamond_x,
-            state.diamond_y,
-            state.diamond_active,
-            self.consts.DIAMOND_WIDTH,
-            self.consts.DIAMOND_HEIGHT,
-            self.DIAMOND_ID,
-        )
-        raster = self._render_object_group(
-            raster,
-            state.enemy_x,
-            state.enemy_y,
-            state.enemy_active,
-            self.consts.ENEMY_WIDTH,
-            self.consts.ENEMY_HEIGHT,
-            self.ENEMY_ID,
-        )
-        ## raster = self._render_object_group(
-        ##     raster,
-        ##     state.helicopter_x,
-        ##     state.helicopter_y,
-        ##     state.helicopter_active,
-        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
-        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
-        ##     self.ENEMY_ID,
-        ## )
-        ## raster = self._render_object_group(
-        ##     raster,
-        ##     state.satellite_x,
-        ##     state.satellite_y,
-        ##     state.satellite_active,
-        ##     self.consts.SATELLITE_ENEMY_WIDTH,
-        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
-        ##     self.ENEMY_ID,
-        ## )
-        return self._render_object_group(
-            raster,
-            state.bullet_x,
-            state.bullet_y,
-            state.bullet_active,
-            self.consts.BULLET_WIDTH,
-            self.consts.BULLET_HEIGHT,
-            self.BULLET_ID,
-        )
+        def render_single_bullet(i, current_raster):
+            should_draw = (active_bullets[i] == 1)
 
-    def _render_object_group(
-        self,
-        raster: jnp.ndarray,
-        x: chex.Array,
-        y: chex.Array,
-        active: chex.Array,
-        width: int,
-        height: int,
-        color_id: int,
-    ) -> jnp.ndarray:
-        """Draw a fixed-size object group, hiding inactive slots at x=-1."""
+            draw_fn = lambda r: self.jr.render_at_clipped(
+                r, 
+                bullet_positions[i][0], 
+                bullet_positions[i][1], 
+                self.SHAPE_MASKS['bullet'],
+            )
 
-        draw_x = jnp.where(active, jnp.round(x).astype(jnp.int32), -1)
-        draw_y = jnp.round(y).astype(jnp.int32)
-        positions = jnp.stack([draw_x, draw_y], axis=1)
-        sizes = jnp.stack(
-            [
-                jnp.full(x.shape, width, dtype=jnp.int32),
-                jnp.full(y.shape, height, dtype=jnp.int32),
-            ],
-            axis=1,
-        )
-        return self.jr.draw_rects(raster, positions, sizes, color_id)
+            return jax.lax.cond(should_draw, draw_fn, lambda r: r, current_raster)
+
+        return jax.lax.fori_loop(0, jnp.size(active_bullets), render_single_bullet, raster)
