@@ -842,6 +842,17 @@ class JaxJamesBond(
         satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
         next_satellite_active = state.satellite_active & satellite_on_screen
 
+        # Fire pit (Scroll left)
+        ## Fire pit speed, here is 0.25 pixels per frame, as far as i checked, fire pit will move if step count % 4 == 3
+        next_pit_x = jnp.where(
+            state.step_count % 4 == 3,
+            state.pit_x -1,
+            state.pit_x
+        )
+        next_pit_y = state.pit_y
+        pit_on_screen = next_pit_x >= (self.consts.GAME_AREA_MIN_X - self.consts.PIT_WIDTH)
+        next_pit_active = state.pit_active & pit_on_screen
+
         # === 2. Spawning logic ===
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
@@ -914,6 +925,27 @@ class JaxJamesBond(
                       75.0, ## TODO: Satellite spawn height, will change if the number is wrong
                       next_satellite_y[available_satellite_idx])
         )
+        ## Fire pit
+        ## TODO: The spawn of fire pit is a little bit complicated, first one spawn at x=124, but from the next one it will spawn at GAME_AREA_MAX_X, and the next one always spawn even the previous one is still on screen(as far as i checked, after the yellow part of fire pit disappears on GAME_AREA_MIN_X)
+        ## TODO: Now i apply the same logic as enemy and diamond, which is only spawn when the entire row is empty, will change it after we discuss about it
+        available_pit_idx = jnp.argmin(next_pit_active) ## Get the first inactive pit index
+        can_spawn_pit = ~jnp.any(next_pit_active) ## Only spawn if the chosen index is inactive
+        # Apply new active status, position coordinates for spawned pits
+        next_pit_active = next_pit_active.at[available_pit_idx].set(
+            jnp.where(can_spawn_pit,
+                      True,
+                      next_pit_active[available_pit_idx])
+        )
+        next_pit_x = next_pit_x.at[available_pit_idx].set(
+            jnp.where(can_spawn_pit,
+                      self.consts.GAME_AREA_MAX_X,
+                      next_pit_x[available_pit_idx])
+        )
+        next_pit_y = next_pit_y.at[available_pit_idx].set(
+            jnp.where(can_spawn_pit,
+                      122.0, ## TODO: Pit spawn height, will change if the number is wrong
+                      next_pit_y[available_pit_idx])
+        )
 
         return state.replace(
             diamond_x=next_diamond_x,
@@ -925,7 +957,10 @@ class JaxJamesBond(
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
-            spawn_diamond_next=next_spawn_diamond_next
+            spawn_diamond_next=next_spawn_diamond_next,
+            pit_x=next_pit_x,
+            pit_y=next_pit_y,
+            pit_active=next_pit_active
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
