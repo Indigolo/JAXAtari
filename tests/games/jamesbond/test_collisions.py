@@ -88,7 +88,9 @@ def test_no_score_while_bullet_misses(env):
     assert int(state.score) == 0
 
 
-def test_bullet_destroys_satellite(env):
+def test_bullet_passes_through_satellite(env):
+    """Original behavior: the bullet ignores satellites entirely."""
+
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
@@ -100,14 +102,16 @@ def test_bullet_destroys_satellite(env):
         player_bullet_x=jnp.array(48),
         player_bullet_y=jnp.array(106),
     )
-    _, state, reward, _, info = env.step(state, jnp.array(NOOP))
-    assert not bool(state.satellite_active[0])
-    assert int(state.score) == env.consts.SCORE_SATELLITE
-    assert not bool(state.player_bullet_active)
-    assert bool(info.hit_enemy)
+    _, state, _, _, info = env.step(state, jnp.array(NOOP))
+    assert bool(state.satellite_active[0])
+    assert int(state.score) == 0
+    assert bool(state.player_bullet_active)
+    assert not bool(info.hit_enemy)
 
 
-def test_helicopter_survives_bullet(env):
+def test_bullet_passes_through_helicopter(env):
+    """Original behavior: the bullet ignores helicopters entirely."""
+
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
@@ -122,8 +126,7 @@ def test_helicopter_survives_bullet(env):
     _, state, _, _, _ = env.step(state, jnp.array(NOOP))
     assert bool(state.helicopter_active[0])
     assert int(state.score) == 0
-    # The bullet is absorbed by the indestructible helicopter.
-    assert not bool(state.player_bullet_active)
+    assert bool(state.player_bullet_active)
 
 
 def test_helicopter_contact_costs_one_life(env):
