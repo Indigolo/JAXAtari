@@ -105,6 +105,14 @@ class JamesBondConstants(struct.PyTreeNode):
     ENEMY_BOMB_FALL_SPEED: float = struct.field(pytree_node=False, default=1.0)
     ENEMY_BOMB_DRIFT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Keeps world-scroll momentum (SPEED_R2L)
 
+    ## Fire pits: ground holes the player must jump over. Deadly on ground
+    ## contact only; bullets and bombs pass over them like in the original.
+    MAX_FIREPITS: int = struct.field(pytree_node=False, default=2)
+    FIREPIT_WIDTH: int = struct.field(pytree_node=False, default=20) ## TODO: Tune against the original sprite (48px on the 160px screen)
+    FIREPIT_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    FIREPIT_Y: int = struct.field(pytree_node=False, default=120) ## Ground row, just below the player top
+    FIREPIT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Same as SPEED_R2L world scroll
+
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
@@ -155,6 +163,9 @@ class JamesBondConstants(struct.PyTreeNode):
     BULLET_COLOR: Tuple[int, int, int] = struct.field(
         pytree_node=False, default=(250, 220, 72)
     )
+    FIREPIT_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(200, 72, 24)
+    )
 
 
 @struct.dataclass
@@ -193,6 +204,8 @@ class JamesBondState:
     satellite_x: chex.Array
     satellite_y: chex.Array
     satellite_active: chex.Array
+    firepit_x: chex.Array
+    firepit_active: chex.Array
     bullet_x: chex.Array
     bullet_y: chex.Array
     bullet_active: chex.Array
@@ -312,6 +325,8 @@ class JaxJamesBond(
             satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
             satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
             satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
+            firepit_x=jnp.zeros((self.consts.MAX_FIREPITS,), dtype=jnp.float32),
+            firepit_active=jnp.zeros((self.consts.MAX_FIREPITS,), dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
@@ -346,6 +361,7 @@ class JaxJamesBond(
         state = self._step_player(state, atari_action)
         state = self._update_objects_placeholder(state)
         state = self._update_enemy_bombs(state)
+        state = self._update_firepits(state)
         state = self._check_collisions_placeholder(state)
 
         _, next_key = jax.random.split(state.key)
@@ -960,6 +976,38 @@ class JaxJamesBond(
             bullet_active=next_bomb_active,
         )
 
+    def _update_firepits(self, state: JamesBondState) -> JamesBondState:
+        """Scroll fire pits with the ground and keep one on screen.
+
+        Pits sit on the ground row and scroll right to left with the world
+        like the other stage objects. A new pit spawns at the right edge as
+        soon as no pit is active.
+        """
+
+        next_firepit_x = state.firepit_x - self.consts.FIREPIT_SPEED
+        firepit_on_screen = next_firepit_x >= (
+            self.consts.GAME_AREA_MIN_X - self.consts.FIREPIT_WIDTH
+        )
+        next_firepit_active = jnp.logical_and(state.firepit_active, firepit_on_screen)
+
+        can_spawn = jnp.logical_not(jnp.any(next_firepit_active))
+        available_idx = jnp.argmin(next_firepit_active)
+        next_firepit_active = next_firepit_active.at[available_idx].set(
+            jnp.where(can_spawn, True, next_firepit_active[available_idx])
+        )
+        next_firepit_x = next_firepit_x.at[available_idx].set(
+            jnp.where(
+                can_spawn,
+                float(self.consts.GAME_AREA_MAX_X),
+                next_firepit_x[available_idx],
+            )
+        )
+
+        return state.replace(
+            firepit_x=next_firepit_x,
+            firepit_active=next_firepit_active,
+        )
+
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         state = state.replace(
@@ -985,7 +1033,51 @@ class JaxJamesBond(
 
         state = self._resolve_player_bullet_collisions(state)
         state = self._resolve_bomb_player_collisions(state)
+        state = self._resolve_firepit_player_collisions(state)
         return self._resolve_player_hazard_collisions(state)
+
+    def _resolve_firepit_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when the player drives into a fire pit.
+
+        Only ground contact is deadly: a jumping player clears the pit. The
+        player bullet and helicopter bombs pass over pits without responding,
+        matching the original game, so no projectile checks happen here.
+        """
+
+        firepit_y = jnp.full_like(state.firepit_x, self.consts.FIREPIT_Y)
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.firepit_x,
+            firepit_y,
+            self.consts.FIREPIT_WIDTH,
+            self.consts.FIREPIT_HEIGHT,
+        )
+        on_ground = state.player_y >= self.consts.PLAYER_INIT_Y
+        firepit_collision = jnp.logical_and(
+            on_ground,
+            jnp.any(jnp.logical_and(state.firepit_active, overlaps)),
+        )
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(firepit_collision, can_take_damage)
+
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            reward_delta=state.reward_delta
+            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
+            collision_happened=jnp.logical_or(
+                state.collision_happened, firepit_collision
+            ),
+        )
 
     def _resolve_bomb_player_collisions(self, state: JamesBondState) -> JamesBondState:
         """Apply one life of damage when a helicopter bomb hits the player.
@@ -1200,6 +1292,7 @@ class JamesBondRenderer(JAXGameRenderer):
                 self.consts.DIAMOND_COLOR,
                 self.consts.ENEMY_COLOR,
                 self.consts.BULLET_COLOR,
+                self.consts.FIREPIT_COLOR,
             ],
             dtype=jnp.uint8,
         )
@@ -1209,6 +1302,7 @@ class JamesBondRenderer(JAXGameRenderer):
         self.DIAMOND_ID = 3
         self.ENEMY_ID = 4
         self.BULLET_ID = 5
+        self.FIREPIT_ID = 6
         self.BACKGROUND = jnp.full(
             (self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH),
             self.BACKGROUND_ID,
@@ -1296,6 +1390,15 @@ class JamesBondRenderer(JAXGameRenderer):
         ##     self.consts.SATELLITE_ENEMY_HEIGHT,
         ##     self.ENEMY_ID,
         ## )
+        raster = self._render_object_group(
+            raster,
+            state.firepit_x,
+            jnp.full_like(state.firepit_x, self.consts.FIREPIT_Y),
+            state.firepit_active,
+            self.consts.FIREPIT_WIDTH,
+            self.consts.FIREPIT_HEIGHT,
+            self.FIREPIT_ID,
+        )
         return self._render_object_group(
             raster,
             state.bullet_x,

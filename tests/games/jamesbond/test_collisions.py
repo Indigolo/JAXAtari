@@ -26,6 +26,7 @@ def _clean_state(env, state):
         diamond_active=jnp.zeros_like(state.diamond_active),
         helicopter_active=jnp.zeros_like(state.helicopter_active),
         satellite_active=jnp.zeros_like(state.satellite_active),
+        firepit_active=jnp.zeros_like(state.firepit_active),
         bullet_active=jnp.zeros_like(state.bullet_active),
     )
 
@@ -203,3 +204,59 @@ def test_bomb_hits_player(env):
     assert int(state.lives) == lives_before - 1
     assert float(reward) == env.consts.REWARD_LOST_LIFE
     assert not bool(state.bullet_active[0])
+
+
+def test_player_dies_in_firepit(env):
+    """Driving into a fire pit on the ground costs one life (cooldown)."""
+
+    _, state = env.reset(jax.random.PRNGKey(0))
+    state = _clean_state(env, state)
+    state = state.replace(
+        firepit_active=state.firepit_active.at[0].set(True),
+        firepit_x=state.firepit_x.at[0].set(state.player_x),
+    )
+    lives_before = int(state.lives)
+    for _ in range(5):
+        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+        # Keep the pit under the player despite scrolling.
+        state = state.replace(
+            firepit_x=state.firepit_x.at[0].set(state.player_x),
+            firepit_active=state.firepit_active.at[0].set(True),
+        )
+    assert int(state.lives) == lives_before - 1
+    assert int(state.hit_cooldown) > 0
+
+
+def test_jumping_player_clears_firepit(env):
+    """A player in the air passes over the pit unharmed."""
+
+    _, state = env.reset(jax.random.PRNGKey(0))
+    state = _clean_state(env, state)
+    state = state.replace(
+        firepit_active=state.firepit_active.at[0].set(True),
+        firepit_x=state.firepit_x.at[0].set(state.player_x),
+        player_y=jnp.array(110.0),
+        player_jumping=jnp.array(True),
+        player_in_air_step=jnp.array(30),
+    )
+    lives_before = int(state.lives)
+    _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+    assert int(state.lives) == lives_before
+
+
+def test_bullet_ignores_firepit(env):
+    """The player shot passes over pits without any collision response."""
+
+    _, state = env.reset(jax.random.PRNGKey(0))
+    state = _clean_state(env, state)
+    state = state.replace(
+        firepit_active=state.firepit_active.at[0].set(True),
+        firepit_x=state.firepit_x.at[0].set(40.0),
+        player_bullet_active=jnp.array(True),
+        player_bullet_step=jnp.array(1),
+        player_bullet_x=jnp.array(40),
+        player_bullet_y=jnp.array(118),
+    )
+    _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+    assert bool(state.player_bullet_active)
+    assert int(state.score) == 0
