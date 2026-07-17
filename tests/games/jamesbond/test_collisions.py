@@ -68,10 +68,29 @@ def test_bullet_shoots_diamond_scores_once(env):
             player_bullet_step=state.player_bullet_step,
         )
     assert int(state.score) == env.consts.SCORE_DIAMOND
+    assert hit_rewards == pytest.approx(env.consts.REWARD_DIAMOND)
     # The planted diamond was destroyed; the spawner then legitimately
     # respawns a fresh one at the right edge, so check position, not slot.
     assert float(state.diamond_x[0]) != pytest.approx(49.0, abs=3.0)
     assert not bool(state.player_bullet_active)
+
+
+def test_reward_is_jittable_and_derived_from_state_changes(env):
+    _, previous_state = env.reset(jax.random.PRNGKey(0))
+    reward_fn = jax.jit(env._get_reward)
+
+    diamond_state = previous_state.replace(
+        score=previous_state.score + env.consts.SCORE_DIAMOND,
+        collected_diamond=jnp.array(True),
+    )
+    damaged_state = previous_state.replace(lives=previous_state.lives - 1)
+
+    assert float(reward_fn(previous_state, diamond_state)) == pytest.approx(
+        env.consts.REWARD_STEP + env.consts.REWARD_DIAMOND
+    )
+    assert float(reward_fn(previous_state, damaged_state)) == pytest.approx(
+        env.consts.REWARD_STEP + env.consts.REWARD_LOST_LIFE
+    )
 
 
 def test_no_score_while_bullet_misses(env):
@@ -163,8 +182,10 @@ def test_helicopter_contact_costs_one_life(env):
         helicopter_y=state.helicopter_y.at[0].set(state.player_y),
     )
     lives_before = int(state.lives)
+    total_reward = 0.0
     for _ in range(5):
-        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+        _, state, reward, _, _ = env.step(state, jnp.array(NOOP))
+        total_reward += float(reward)
         state = state.replace(
             helicopter_x=state.helicopter_x.at[0].set(state.player_x),
             helicopter_y=state.helicopter_y.at[0].set(state.player_y),
@@ -172,6 +193,7 @@ def test_helicopter_contact_costs_one_life(env):
     # Cooldown ensures a sustained overlap only costs a single life.
     assert int(state.lives) == lives_before - 1
     assert int(state.hit_cooldown) > 0
+    assert total_reward == pytest.approx(env.consts.REWARD_LOST_LIFE)
 
 
 def test_helicopter_drops_bomb(env):
@@ -216,8 +238,10 @@ def test_player_dies_in_firepit(env):
         firepit_x=state.firepit_x.at[0].set(state.player_x),
     )
     lives_before = int(state.lives)
+    total_reward = 0.0
     for _ in range(5):
-        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+        _, state, reward, _, _ = env.step(state, jnp.array(NOOP))
+        total_reward += float(reward)
         # Keep the pit under the player despite scrolling.
         state = state.replace(
             firepit_x=state.firepit_x.at[0].set(state.player_x),
@@ -225,6 +249,7 @@ def test_player_dies_in_firepit(env):
         )
     assert int(state.lives) == lives_before - 1
     assert int(state.hit_cooldown) > 0
+    assert total_reward == pytest.approx(env.consts.REWARD_LOST_LIFE)
 
 
 def test_jumping_player_clears_firepit(env):

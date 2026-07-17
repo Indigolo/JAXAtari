@@ -97,9 +97,6 @@ class JamesBondConstants(struct.PyTreeNode):
     HELICOPTER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < HELICOPTER_ENEMY_HEIGHT 6
     SATELLITE_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < SATELLITE_ENEMY_WIDTH 8
     SATELLITE_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=12) ## < SATELLITE_ENEMY_HEIGHT 14
-    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: Only player?
-    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
 
@@ -214,8 +211,6 @@ class JamesBondState:
     bullet_x: chex.Array
     bullet_y: chex.Array
     bullet_active: chex.Array
-    reward_delta: chex.Array
-    collision_happened: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -242,7 +237,6 @@ class JamesBondObservation:
 class JamesBondInfo:
     """Debug/event info for smoke tests and future gameplay systems."""
 
-    collision_happened: jnp.ndarray
     collected_diamond: jnp.ndarray
     hit_enemy: jnp.ndarray
     fired_bullet: jnp.ndarray
@@ -335,8 +329,6 @@ class JaxJamesBond(
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
-            reward_delta=jnp.array(0.0, dtype=jnp.float32), ## TODO: What for?
-            collision_happened=jnp.array(False, dtype=jnp.bool_), ## TODO: What for?
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -356,10 +348,8 @@ class JaxJamesBond(
 
         state = state.replace(
             step_count=state.step_count + 1,
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
-            reward_delta=jnp.array(0.0, dtype=jnp.float32),
             hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
             fired_bullet=atari_action == Action.FIRE,
         )
@@ -535,7 +525,6 @@ class JaxJamesBond(
     @partial(jax.jit, static_argnums=(0,))
     def _get_info(self, state: JamesBondState) -> JamesBondInfo:
         return JamesBondInfo(
-            collision_happened=state.collision_happened,
             collected_diamond=state.collected_diamond,
             hit_enemy=state.hit_enemy,
             fired_bullet=state.fired_bullet,
@@ -1016,7 +1005,6 @@ class JaxJamesBond(
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         state = state.replace(
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
         )
@@ -1081,11 +1069,6 @@ class JaxJamesBond(
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
-            reward_delta=state.reward_delta
-            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
-            collision_happened=jnp.logical_or(
-                state.collision_happened, firepit_collision
-            ),
         )
 
     def _resolve_bomb_player_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -1102,8 +1085,8 @@ class JaxJamesBond(
             self.consts.PLAYER_COLLISION_HEIGHT,
             state.bullet_x,
             state.bullet_y,
-            self.consts.BULLET_COLLISION_WIDTH,
-            self.consts.BULLET_COLLISION_HEIGHT,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
         )
         bomb_hits = jnp.logical_and(state.bullet_active, overlaps)
         hit_any = jnp.any(bomb_hits)
@@ -1122,9 +1105,6 @@ class JaxJamesBond(
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
-            reward_delta=state.reward_delta
-            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
-            collision_happened=jnp.logical_or(state.collision_happened, hit_any),
         )
 
     def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -1167,11 +1147,6 @@ class JaxJamesBond(
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
-            reward_delta=state.reward_delta
-            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE,
-            collision_happened=jnp.logical_or(
-                state.collision_happened, hazard_collision
-            ),
             hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
         )
     
@@ -1181,8 +1156,8 @@ class JaxJamesBond(
         overlaps = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
-            self.consts.BULLET_COLLISION_WIDTH,
-            self.consts.BULLET_COLLISION_HEIGHT,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
             state.diamond_x,
             state.diamond_y,
             self.consts.DIAMOND_COLLISION_WIDTH,
@@ -1234,11 +1209,6 @@ class JaxJamesBond(
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
             score=state.score + collected_count * self.consts.SCORE_DIAMOND,
-            reward_delta=state.reward_delta
-            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND,
-            collision_happened=jnp.logical_or(
-                state.collision_happened, collected_any
-            ),
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
@@ -1257,10 +1227,21 @@ class JaxJamesBond(
     def _get_reward(
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
-        """Return the step reward until scoring events are implemented."""
+        """Calculate reward from collision-driven state transitions."""
 
-        del previous_state
-        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32) + state.reward_delta
+        score_gained = jnp.maximum(state.score - previous_state.score, 0)
+        diamonds_collected = jnp.where(
+            state.collected_diamond,
+            jnp.floor_divide(score_gained, self.consts.SCORE_DIAMOND),
+            0,
+        )
+        lives_lost = jnp.maximum(previous_state.lives - state.lives, 0)
+
+        return (
+            jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+            + diamonds_collected.astype(jnp.float32) * self.consts.REWARD_DIAMOND
+            + lives_lost.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE
+        )
 
     def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
