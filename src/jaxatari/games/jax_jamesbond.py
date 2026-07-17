@@ -83,9 +83,6 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ## The player shot vanishes just above the row of the highest on-screen
-    ## object (diamond/helicopter/satellite), like in the original game.
-    BULLET_DESPAWN_MARGIN: int = struct.field(pytree_node=False, default=4)
 
     # Collision boxes are kept a little smaller than the real sprite sizes so
     # near-misses do not register, matching how the original game feels.
@@ -772,26 +769,6 @@ class JaxJamesBond(
 
         player_bullet_active = jnp.where(
             player_bullet_step >= 30,
-            False,
-            player_bullet_active
-        )
-
-        ## Original: the shot disappears once it crosses just above the row of
-        ## the highest active object (diamond, helicopter or satellite). With
-        ## no objects on screen the step-30 lifetime above is the only limit.
-        object_rows = jnp.concatenate([
-            jnp.where(state.diamond_active, state.diamond_y, jnp.inf),
-            jnp.where(state.helicopter_active, state.helicopter_y, jnp.inf),
-            jnp.where(state.satellite_active, state.satellite_y, jnp.inf),
-        ])
-        has_objects = jnp.any(jnp.isfinite(object_rows))
-        despawn_line = jnp.where(
-            has_objects,
-            jnp.min(object_rows) - self.consts.BULLET_DESPAWN_MARGIN,
-            -jnp.inf,
-        )
-        player_bullet_active = jnp.where(
-            player_bullet_y < despawn_line,
             False,
             player_bullet_active
         )
