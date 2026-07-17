@@ -21,45 +21,43 @@ from jaxatari.environment import JaxEnvironment, ObjectObservation
 from jaxatari.renderers import JAXGameRenderer
 from jaxatari.rendering import jax_rendering_utils as render_utils
 
-def get_default_asset_config() -> tuple:
-        asset_config = [
-            {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Need to create background all black sprite?
-            {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
-            {'name': 'car', 'type': 'single', 'file': 'car.npy'},
-            {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
-            {
-                'name': 'helicopter', 'type': 'group',
-                'files': ['helicopter_1.npy', 'helicopter_2.npy']
-            },
-            {
-                'name': 'helicopter_melee', 'type': 'group',
-                'files': ['helicopter_shot_1.npy', 'helicopter_shot_2.npy'] ## TODO: Add others
-            },
-            {
-                'name': 'pit', 'type': 'group',
-                'files': ['fire_pit_1.npy', 'fire_pit_2.npy']
-            },
-            {
-                'name': 'diamond', 'type': 'group',
-                'files': ['diamond_1.npy', 'diamond_2.npy']
-            },
-            {
-                'name': 'stars', 'type': 'group', 
-                'files': ['stars_1.npy', 'stars_2.npy']
-             },
 
-            {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
-            
-            {
-                'name': 'score_digits', 'type': 'digits',
-                'pattern': 'score_{}.npy' ## TODO: Add digits 6-9
-            },
-            {
-                'name': 'bullet', 'type': 'single', ## TODO: All bullets the same sprite?
-                'file': 'bullet.npy'
-            }
-        ]
-        return asset_config
+def get_default_asset_config() -> tuple:
+    return (
+        {"name": "background", "type": "background", "file": "background.npy"},
+        {"name": "ground", "type": "single", "file": "ground.npy"},
+        {"name": "car", "type": "single", "file": "car.npy"},
+        {"name": "satellite", "type": "single", "file": "satellite.npy"},
+        {
+            "name": "helicopter",
+            "type": "group",
+            "files": ["helicopter_1.npy", "helicopter_2.npy"],
+        },
+        {
+            "name": "helicopter_melee",
+            "type": "group",
+            "files": ["helicopter_shot_1.npy", "helicopter_shot_2.npy"],
+        },
+        {
+            "name": "pit",
+            "type": "group",
+            "files": ["fire_pit_1.npy", "fire_pit_2.npy"],
+        },
+        {
+            "name": "diamond",
+            "type": "group",
+            "files": ["diamond_1.npy", "diamond_2.npy"],
+        },
+        {
+            "name": "stars",
+            "type": "group",
+            "files": ["stars_1.npy", "stars_2.npy"],
+        },
+        {"name": "life", "type": "single", "file": "car_life.npy"},
+        {"name": "score_digits", "type": "digits", "pattern": "score_{}.npy"},
+        {"name": "bullet", "type": "single", "file": "bullet.npy"},
+    )
+
 
 def _aabb_overlap(
     ax: chex.Array,
@@ -124,18 +122,34 @@ class JamesBondConstants(struct.PyTreeNode):
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
-    # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
-    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
-    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: Only player?
-    BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-
+    # Collision boxes are kept a little smaller than the real sprite sizes so
+    # near-misses do not register, matching how the original game feels.
+    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < PLAYER_WIDTH 8
+    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=3)  ## < PLAYER_HEIGHT 4
+    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)  ## < DIAMOND_WIDTH 7
+    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < DIAMOND_HEIGHT 13
+    HELICOPTER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)  ## < HELICOPTER_ENEMY_WIDTH 8
+    HELICOPTER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < HELICOPTER_ENEMY_HEIGHT 6
+    SATELLITE_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < SATELLITE_ENEMY_WIDTH 8
+    SATELLITE_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=12) ## < SATELLITE_ENEMY_HEIGHT 14
     SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
+
+    ## Helicopter bombs (enemy fire), stored in the generic bullet_* arrays.
+    ENEMY_BOMB_DROP_PERIOD: int = struct.field(pytree_node=False, default=60) ## Frames between drops
+    ENEMY_BOMB_FALL_SPEED: float = struct.field(pytree_node=False, default=1.0)
+    ENEMY_BOMB_DRIFT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Keeps world-scroll momentum (SPEED_R2L)
+
+    ## Fire pits: ground holes the player must jump over. Deadly on ground
+    ## contact only; bullets and bombs pass over them like in the original.
+    MAX_FIREPITS: int = struct.field(pytree_node=False, default=2)
+    FIREPIT_WIDTH: int = struct.field(pytree_node=False, default=20) ## TODO: Tune against the original sprite (48px on the 160px screen)
+    FIREPIT_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    FIREPIT_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=14) ## < FIREPIT_WIDTH 20, so an edge tap is survivable
+    FIREPIT_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < FIREPIT_HEIGHT 5
+    FIREPIT_Y: int = struct.field(pytree_node=False, default=120) ## Ground row, just below the player top
+    FIREPIT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Same as SPEED_R2L world scroll
+
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
@@ -144,7 +158,9 @@ class JamesBondConstants(struct.PyTreeNode):
     REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0)
     REWARD_LOST_LIFE: float = struct.field(pytree_node=False, default=-1.0)
 
-    ASSET_CONFIG: tuple = struct.field(pytree_node=False, default_factory=get_default_asset_config)
+    ASSET_CONFIG: tuple = struct.field(
+        pytree_node=False, default_factory=get_default_asset_config
+    )
 
     ACTION_MEANINGS: Tuple[str, ...] = struct.field( ## TODO: What is this for?
         pytree_node=False,
@@ -170,6 +186,28 @@ class JamesBondConstants(struct.PyTreeNode):
             ),
     )
 
+    BACKGROUND_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(8, 14, 32)
+    )
+    PLAY_AREA_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(20, 42, 66)
+    )
+    PLAYER_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(236, 236, 236)
+    )
+    DIAMOND_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(0, 216, 255)
+    )
+    ENEMY_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(220, 64, 64)
+    )
+    BULLET_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(250, 220, 72)
+    )
+    FIREPIT_COLOR: Tuple[int, int, int] = struct.field(
+        pytree_node=False, default=(200, 72, 24)
+    )
+
 
 @struct.dataclass
 class JamesBondState:
@@ -183,7 +221,7 @@ class JamesBondState:
     player_falling: chex.Array
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
-    player_bullet_active: chex.Array ## TODO: Maybe think about every bullet as bullet with different and direction (and speed?)?
+    player_bullet_active: chex.Array
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
     player_bullet_y: chex.Array
@@ -197,9 +235,6 @@ class JamesBondState:
     diamond_y: chex.Array
     diamond_active: chex.Array
     spawn_diamond_next: chex.Array
-    pit_x: chex.Array
-    pit_y: chex.Array
-    pit_active: chex.Array
     enemy_x: chex.Array
     enemy_y: chex.Array
     enemy_active: chex.Array
@@ -210,11 +245,11 @@ class JamesBondState:
     satellite_x: chex.Array
     satellite_y: chex.Array
     satellite_active: chex.Array
+    firepit_x: chex.Array
+    firepit_active: chex.Array
     bullet_x: chex.Array
     bullet_y: chex.Array
     bullet_active: chex.Array
-    reward_delta: chex.Array
-    collision_happened: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -241,7 +276,6 @@ class JamesBondObservation:
 class JamesBondInfo:
     """Debug/event info for smoke tests and future gameplay systems."""
 
-    collision_happened: jnp.ndarray
     collected_diamond: jnp.ndarray
     hit_enemy: jnp.ndarray
     fired_bullet: jnp.ndarray
@@ -296,7 +330,7 @@ class JaxJamesBond(
         state_key, _ = jax.random.split(key)
 
         state = JamesBondState(
-            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32), ## TODO: Change all float32 pos-s to int32
+            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32),
             player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.float32),
             player_vx=jnp.array(0, dtype=jnp.int32),
             player_vy=jnp.array(0, dtype=jnp.int32),
@@ -314,12 +348,9 @@ class JaxJamesBond(
             step_count=jnp.array(0, dtype=jnp.int32),
             level_progress=jnp.array(0, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
-            diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32), ## TODO: Change max diamonds to 1? Also others...
+            diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
             diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
-            pit_x=jnp.array(0, dtype=jnp.int32),
-            pit_y=jnp.array(0, dtype=jnp.int32),
-            pit_active=jnp.array(False, dtype=jnp.bool_),
             spawn_diamond_next=jnp.array(True, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional?
             ## TODO: Change / Remove after observation and collision enemy variables have been changed; or else will cause fail tests
             enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
@@ -332,11 +363,11 @@ class JaxJamesBond(
             satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
             satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
             satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
+            firepit_x=jnp.zeros((self.consts.MAX_FIREPITS,), dtype=jnp.float32),
+            firepit_active=jnp.zeros((self.consts.MAX_FIREPITS,), dtype=jnp.bool_),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
-            reward_delta=jnp.array(0.0, dtype=jnp.float32), ## TODO: What for?
-            collision_happened=jnp.array(False, dtype=jnp.bool_), ## TODO: What for?
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -356,15 +387,15 @@ class JaxJamesBond(
 
         state = state.replace(
             step_count=state.step_count + 1,
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
-            reward_delta=jnp.array(0.0, dtype=jnp.float32),
             hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
             fired_bullet=atari_action == Action.FIRE,
         )
         state = self._step_player(state, atari_action)
         state = self._update_objects_placeholder(state)
+        state = self._update_enemy_bombs(state)
+        state = self._update_firepits(state)
         state = self._check_collisions_placeholder(state)
 
         _, next_key = jax.random.split(state.key)
@@ -448,9 +479,6 @@ class JaxJamesBond(
             width=jnp.array(self.consts.PLAYER_WIDTH, dtype=jnp.int32),
             height=jnp.array(self.consts.PLAYER_HEIGHT, dtype=jnp.int32),
             active=jnp.array(True, dtype=jnp.bool_),
-            orientation=jnp.array(0.0, dtype=jnp.float32),
-            state=jnp.array(0, dtype=jnp.int32),
-            visual_id=jnp.array(0, dtype=jnp.int32),
         )
         diamonds = self._object_group_observation(
             state.diamond_x,
@@ -486,7 +514,11 @@ class JaxJamesBond(
             state.bullet_active,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0),
+            ## bullet_vx is a scalar, so broadcast the orientation to one value
+            ## per bullet slot or the observation loses 3 features vs the space.
+            orientation=jnp.broadcast_to(
+                jnp.where(state.bullet_vx < 0, 270.0, 90.0), state.bullet_x.shape
+            ),
         )
         return JamesBondObservation(
             player=player,
@@ -514,12 +546,15 @@ class JaxJamesBond(
     ) -> ObjectObservation:
         """Convert fixed-size object arrays plus masks into ObjectObservation."""
 
-        if orientation is None: ## TODO: Maybe remove if not needed
-            orientation = jnp.zeros_like(x, dtype=jnp.float32)
+        ## Inactive objects keep drifting in _update_objects_placeholder, so
+        ## their stale coordinates can leave the screen bounds. Zero them out
+        ## and clamp active ones so the observation stays inside its space.
+        safe_x = jnp.where(active, jnp.clip(x, 0, self.consts.SCREEN_WIDTH), 0.0)
+        safe_y = jnp.where(active, jnp.clip(y, 0, self.consts.SCREEN_HEIGHT), 0.0)
 
         return ObjectObservation.create(
-            x=x,
-            y=y,
+            x=safe_x,
+            y=safe_y,
             width=jnp.full(x.shape, width, dtype=jnp.int32),
             height=jnp.full(y.shape, height, dtype=jnp.int32),
             active=active,
@@ -529,7 +564,6 @@ class JaxJamesBond(
     @partial(jax.jit, static_argnums=(0,))
     def _get_info(self, state: JamesBondState) -> JamesBondInfo:
         return JamesBondInfo(
-            collision_happened=state.collision_happened,
             collected_diamond=state.collected_diamond,
             hit_enemy=state.hit_enemy,
             fired_bullet=state.fired_bullet,
@@ -789,69 +823,37 @@ class JaxJamesBond(
             player_fast_falling = player_fast_falling.astype(jnp.bool_),
             player_in_air_step = player_in_air_step.astype(jnp.int32),
             player_bullet_active = player_bullet_active.astype(jnp.bool_),
-            player_bullet_step = player_bullet_active.astype(jnp.int32),
-            player_bullet_x = player_bullet_active.astype(jnp.int32),
-            player_bullet_y = player_bullet_active.astype(jnp.int32),
+            player_bullet_step = player_bullet_step.astype(jnp.int32),
+            player_bullet_x = player_bullet_x.astype(jnp.int32),
+            player_bullet_y = player_bullet_y.astype(jnp.int32),
         )
 
-    def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: Implement fire pit
+    def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
+        ## TODO: Checking the speed of objects per frame, will change if it is wrong, if the speed is constant, then move to consts
+        ## TODO: If the speed is not float, then use jnp.where to move it
+        SPEED_R2L = 0.75 ## Speed right to left, apply for diamond and helicopter
+        SPEED_L2R = 1.5 ## Speed left to right, apply for satelitte
 
         # Diamonds (Scroll left)
-        ## Diamond speed, here is 0.5 pixels per frame
-        next_diamond_x = jnp.where(
-            state.step_count % 2 == 0,
-            state.diamond_x - 1,
-            state.diamond_x
-        )
+        next_diamond_x = state.diamond_x - SPEED_R2L ## TODO: Diamond speed, will change if old speed is wrong
         next_diamond_y = state.diamond_y
         diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
         next_diamond_active = state.diamond_active & diamond_on_screen
 
         # Enemies
         ## Helicopter enemy (Scroll left)
-        ## 1. Determine which speed zone the helicopter is currently in
-        in_slow_mode = (state.helicopter_x <= 96) & (state.helicopter_x > 63)
-        ## 2. The speed of helicopter is 0.6 pixels per frame in normal mode, and 0.375 pixels per frame in slow mode
-        move_normal = (state.step_count % 5 == 0) | (state.step_count % 5 == 2) | (state.step_count % 5 == 4)
-        move_slow = (state.step_count % 8 == 1) | (state.step_count % 8 == 4) | (state.step_count % 8 == 7)
-        move_helicopter = jnp.where(
-            in_slow_mode,
-            move_slow,
-            move_normal
-        )
-        next_helicopter_x = jnp.where(
-            move_helicopter,
-            state.helicopter_x - 1,
-            state.helicopter_x
-        )
+        next_helicopter_x = state.helicopter_x - SPEED_R2L ## TODO: Helicopter enemy speed, will change if old speed is wrong
         next_helicopter_y = state.helicopter_y
         helicopter_on_screen = next_helicopter_x >= (self.consts.GAME_AREA_MIN_X - self.consts.HELICOPTER_ENEMY_WIDTH)
         next_helicopter_active = state.helicopter_active & helicopter_on_screen
-        
         ## Satellite enemy (Scroll right)
-        ## Satellite enemy speed, here is 0.8 pixels per frame
-        next_satellite_x = jnp.where(
-            state.step_count % 5 != 4,
-            state.satellite_x + 1,
-            state.satellite_x
-        )
+        next_satellite_x = state.satellite_x + SPEED_L2R ## TODO: Satellite enemy speed, will change if old speed is wrong
         next_satellite_y = state.satellite_y
         satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
         next_satellite_active = state.satellite_active & satellite_on_screen
-
-        # Fire pit (Scroll left)
-        ## Fire pit speed, here is 0.25 pixels per frame, as far as i checked, fire pit will move if step count % 4 == 3
-        next_pit_x = jnp.where(
-            state.step_count % 4 == 3,
-            state.pit_x -1,
-            state.pit_x
-        )
-        next_pit_y = state.pit_y
-        pit_on_screen = next_pit_x >= (self.consts.GAME_AREA_MIN_X - self.consts.PIT_WIDTH)
-        next_pit_active = state.pit_active & pit_on_screen
 
         # === 2. Spawning logic ===
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
@@ -925,27 +927,6 @@ class JaxJamesBond(
                       75.0, ## TODO: Satellite spawn height, will change if the number is wrong
                       next_satellite_y[available_satellite_idx])
         )
-        ## Fire pit
-        ## TODO: The spawn of fire pit is a little bit complicated, first one spawn at x=124, but from the next one it will spawn at GAME_AREA_MAX_X, and the next one always spawn even the previous one is still on screen(as far as i checked, after the yellow part of fire pit disappears on GAME_AREA_MIN_X)
-        ## TODO: Now i apply the same logic as enemy and diamond, which is only spawn when the entire row is empty, will change it after we discuss about it
-        available_pit_idx = jnp.argmin(next_pit_active) ## Get the first inactive pit index
-        can_spawn_pit = ~jnp.any(next_pit_active) ## Only spawn if the chosen index is inactive
-        # Apply new active status, position coordinates for spawned pits
-        next_pit_active = next_pit_active.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      True,
-                      next_pit_active[available_pit_idx])
-        )
-        next_pit_x = next_pit_x.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      self.consts.GAME_AREA_MAX_X,
-                      next_pit_x[available_pit_idx])
-        )
-        next_pit_y = next_pit_y.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      122.0, ## TODO: Pit spawn height, will change if the number is wrong
-                      next_pit_y[available_pit_idx])
-        )
 
         return state.replace(
             diamond_x=next_diamond_x,
@@ -957,16 +938,92 @@ class JaxJamesBond(
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
-            spawn_diamond_next=next_spawn_diamond_next,
-            pit_x=next_pit_x,
-            pit_y=next_pit_y,
-            pit_active=next_pit_active
+            spawn_diamond_next=next_spawn_diamond_next
+        )
+
+    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
+        """Move falling helicopter bombs and periodically drop new ones.
+
+        Bombs live in the generic bullet_* arrays. They fall straight down
+        while keeping the world-scroll drift, and despawn once they are
+        fully below the player's row.
+        """
+
+        # === 1. Move active bombs, despawn below the play area ===
+        next_bomb_x = state.bullet_x - self.consts.ENEMY_BOMB_DRIFT_SPEED
+        next_bomb_y = state.bullet_y + self.consts.ENEMY_BOMB_FALL_SPEED
+        bomb_on_screen = next_bomb_y <= (
+            self.consts.GAME_AREA_MAX_Y + self.consts.PLAYER_COLLISION_HEIGHT
+        )
+        next_bomb_active = jnp.logical_and(state.bullet_active, bomb_on_screen)
+
+        # === 2. Periodic drop from the first active helicopter ===
+        drop_frame = (state.step_count % self.consts.ENEMY_BOMB_DROP_PERIOD) == 0
+        shooter_idx = jnp.argmax(state.helicopter_active)
+        has_shooter = jnp.any(state.helicopter_active)
+        free_slot = jnp.argmax(jnp.logical_not(next_bomb_active))
+        has_free_slot = jnp.any(jnp.logical_not(next_bomb_active))
+        do_drop = jnp.logical_and(
+            jnp.logical_and(drop_frame, has_shooter), has_free_slot
+        )
+
+        drop_x = (
+            state.helicopter_x[shooter_idx]
+            + self.consts.HELICOPTER_ENEMY_WIDTH / 2
+        )
+        drop_y = state.helicopter_y[shooter_idx] + self.consts.HELICOPTER_ENEMY_HEIGHT
+
+        next_bomb_x = next_bomb_x.at[free_slot].set(
+            jnp.where(do_drop, drop_x, next_bomb_x[free_slot])
+        )
+        next_bomb_y = next_bomb_y.at[free_slot].set(
+            jnp.where(do_drop, drop_y, next_bomb_y[free_slot])
+        )
+        next_bomb_active = next_bomb_active.at[free_slot].set(
+            jnp.where(do_drop, True, next_bomb_active[free_slot])
+        )
+
+        return state.replace(
+            bullet_x=next_bomb_x,
+            bullet_y=next_bomb_y,
+            bullet_active=next_bomb_active,
+        )
+
+    def _update_firepits(self, state: JamesBondState) -> JamesBondState:
+        """Scroll fire pits with the ground and keep one on screen.
+
+        Pits sit on the ground row and scroll right to left with the world
+        like the other stage objects. A new pit spawns at the right edge as
+        soon as no pit is active.
+        """
+
+        next_firepit_x = state.firepit_x - self.consts.FIREPIT_SPEED
+        firepit_on_screen = next_firepit_x >= (
+            self.consts.GAME_AREA_MIN_X - self.consts.FIREPIT_WIDTH
+        )
+        next_firepit_active = jnp.logical_and(state.firepit_active, firepit_on_screen)
+
+        can_spawn = jnp.logical_not(jnp.any(next_firepit_active))
+        available_idx = jnp.argmin(next_firepit_active)
+        next_firepit_active = next_firepit_active.at[available_idx].set(
+            jnp.where(can_spawn, True, next_firepit_active[available_idx])
+        )
+        next_firepit_x = next_firepit_x.at[available_idx].set(
+            jnp.where(
+                can_spawn,
+                float(self.consts.GAME_AREA_MAX_X),
+                next_firepit_x[available_idx],
+            )
+        )
+
+        return state.replace(
+            firepit_x=next_firepit_x,
+            firepit_active=next_firepit_active,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         state = state.replace(
-            collision_happened=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
         )
@@ -987,23 +1044,114 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
+        state = self._resolve_bomb_player_collisions(state)
+        state = self._resolve_firepit_player_collisions(state)
         return self._resolve_player_hazard_collisions(state)
 
-    def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Apply one life of damage when the player touches an active enemy."""
+    def _resolve_firepit_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when the player drives into a fire pit.
+
+        The pit is already positioned on the ground, so the AABB overlap alone
+        distinguishes ground contact from a jumping player clearing it. Player
+        bullets and helicopter bombs pass over pits without responding.
+        """
+
+        ## Center the smaller collision box inside the wider pit sprite so an
+        ## edge tap is survivable but driving into the middle is fatal.
+        firepit_inset = (self.consts.FIREPIT_WIDTH - self.consts.FIREPIT_COLLISION_WIDTH) / 2
+        firepit_cx = state.firepit_x + firepit_inset
+        firepit_y = jnp.full_like(state.firepit_x, self.consts.FIREPIT_Y)
+        overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            firepit_cx,
+            firepit_y,
+            self.consts.FIREPIT_COLLISION_WIDTH,
+            self.consts.FIREPIT_COLLISION_HEIGHT,
+        )
+        firepit_collision = jnp.any(
+            jnp.logical_and(state.firepit_active, overlaps)
+        )
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(firepit_collision, can_take_damage)
+
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+        )
+
+    def _resolve_bomb_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when a helicopter bomb hits the player.
+
+        The bomb always detonates (deactivates) on contact; the life is only
+        lost when the hit cooldown has expired, mirroring the hazard rule.
+        """
 
         overlaps = _aabb_overlap(
             state.player_x,
             state.player_y,
             self.consts.PLAYER_COLLISION_WIDTH,
             self.consts.PLAYER_COLLISION_HEIGHT,
-            state.enemy_x,
-            state.enemy_y,
-            self.consts.ENEMY_COLLISION_WIDTH,
-            self.consts.ENEMY_COLLISION_HEIGHT,
+            state.bullet_x,
+            state.bullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+        )
+        bomb_hits = jnp.logical_and(state.bullet_active, overlaps)
+        hit_any = jnp.any(bomb_hits)
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(hit_any, can_take_damage)
+
+        return state.replace(
+            bullet_active=jnp.logical_and(
+                state.bullet_active, jnp.logical_not(bomb_hits)
+            ),
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
         )
 
-        hazard_collision = jnp.any(jnp.logical_and(state.enemy_active, overlaps))
+    def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Apply one life of damage when the player touches an active enemy."""
+
+        helicopter_overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.helicopter_x,
+            state.helicopter_y,
+            self.consts.HELICOPTER_COLLISION_WIDTH,
+            self.consts.HELICOPTER_COLLISION_HEIGHT,
+        )
+        satellite_overlaps = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.satellite_x,
+            state.satellite_y,
+            self.consts.SATELLITE_COLLISION_WIDTH,
+            self.consts.SATELLITE_COLLISION_HEIGHT,
+        )
+
+        hazard_collision = jnp.logical_or(
+            jnp.any(jnp.logical_and(state.helicopter_active, helicopter_overlaps)),
+            jnp.any(jnp.logical_and(state.satellite_active, satellite_overlaps)),
+        )
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hazard_collision, can_take_damage)
 
@@ -1016,11 +1164,6 @@ class JaxJamesBond(
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
-            reward_delta=state.reward_delta
-            + took_damage.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE, ## TODO: There are 5 lives in ALE
-            collision_happened=jnp.logical_or(
-                state.collision_happened, hazard_collision
-            ),
             hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision),
         )
     
@@ -1030,18 +1173,22 @@ class JaxJamesBond(
         overlaps = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
-            self.consts.BULLET_COLLISION_WIDTH,
-            self.consts.BULLET_COLLISION_HEIGHT,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
             state.diamond_x,
             state.diamond_y,
             self.consts.DIAMOND_COLLISION_WIDTH,
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
 
-        collected = jnp.logical_and(jnp.any(state.diamond_active), overlaps)
-        hits = jnp.any(collected, axis=0)
-        collected_any = jnp.any(hits)
-        collected_count = jnp.sum(hits.astype(jnp.int32)) ## TODO: Is it not only one per frame?
+        ## Gate per diamond slot: only active diamonds can be hit, and only
+        ## while the bullet itself is active.
+        collected = jnp.logical_and(
+            jnp.logical_and(state.diamond_active, state.player_bullet_active),
+            overlaps,
+        )
+        collected_any = jnp.any(collected)
+        collected_count = jnp.sum(collected.astype(jnp.int32))
 
         player_bullet_active = jnp.where(
             jnp.logical_and(
@@ -1078,118 +1225,40 @@ class JaxJamesBond(
             player_bullet_step=player_bullet_step,
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
-            score=state.score + self.consts.SCORE_DIAMOND,
-            reward_delta=state.reward_delta
-            + collected_count.astype(jnp.float32) * self.consts.REWARD_DIAMOND, 
-            collision_happened=jnp.logical_or(
-                state.collision_happened, collected_any
-            ),
+            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
-    ## TODO: Maybe use for the 2nd stage
-    """
-    def bullet_enemy_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """"Deactivate bullets and enemies whose collision boxes overlap.""""
-
-        overlaps = _aabb_overlap(
-            state.player_bullet_x,
-            state.player_bullet_y,
-            self.consts.BULLET_COLLISION_WIDTH,
-            self.consts.BULLET_COLLISION_HEIGHT,
-            state.enemy_x[None, :],
-            state.enemy_y[None, :],
-            self.consts.ENEMY_COLLISION_WIDTH,
-            self.consts.ENEMY_COLLISION_HEIGHT,
-        )
-        
-        active_pairs = jnp.logical_and(
-            state.bullet_active[:, None], state.enemy_active[None, :]
-        )
-        hits = jnp.logical_and(active_pairs, overlaps)
-        bullet_hits = jnp.any(hits, axis=1)
-        enemy_hits = jnp.any(hits, axis=0)
-        hit_any = jnp.any(enemy_hits)
-        hit_count = jnp.sum(enemy_hits.astype(jnp.int32))  ## TODO: Is it not only one per frame?
-
-        player_bullet_active = jnp.where(
-            jnp.logical_and(
-                state.player_bullet_active, 
-                jnp.logical_not(jnp.any(hits))
-            ),
-            state.player_bullet_active,
-            False
-        )
-
-        player_bullet_x = jnp.where(
-            player_bullet_active,
-            state.player_bullet_x,
-            -1
-        )
-
-        player_bullet_y = jnp.where(
-            player_bullet_active,
-            state.player_bullet_y,
-            -1
-        )
-
-        player_bullet_step = jnp.where(
-            player_bullet_active,
-            state.player_bullet_step,
-            -1
-        )
-
-        return state.replace(
-            bullet_active=jnp.logical_and(
-                state.bullet_active, jnp.logical_not(bullet_hits)
-            ),
-            enemy_active=jnp.logical_and( ## TODO: Some enemies don't deactivate
-                state.enemy_active, jnp.logical_not(enemy_hits)
-            ),
-            player_bullet_active=player_bullet_active,
-            player_bullet_step=player_bullet_step,
-            player_bullet_x=player_bullet_x,
-            player_bullet_y=player_bullet_y,
-            score=state.score + hit_count * self.consts.SCORE_ENEMY,
-            reward_delta=state.reward_delta
-            + hit_count.astype(jnp.float32) * self.consts.REWARD_ENEMY,
-            collision_happened=jnp.logical_or(state.collision_happened, hit_any),
-            hit_enemy=jnp.logical_or(state.hit_enemy, hit_any),
-        )
-    """
-    
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
-        check_collisions = jnp.where(
+        ## In the original game the bullet passes straight through helicopters
+        ## and satellites without any visible response: the diamond is the
+        ## only object the player bullet collides with, so only that check
+        ## runs, and only while a bullet is in flight.
+        return lax.cond(
             state.player_bullet_active,
-            True,
-            False
-        )
-        
-        new_state = lax.cond(
-            check_collisions,
             self.collectible_collisions_logic,
             lambda s: s,
             state
         )
 
-        """
-        new_state = lax.cond(
-            check_collisions,
-            self.bullet_enemy_collisions_logic, ## TODO: Do we need this? Enemies don't get hit right?
-            lambda s: s,
-            new_state
-        )
-        """
-
-        return new_state
-
     def _get_reward(
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
-        """Return the step reward until scoring events are implemented."""
+        """Calculate reward from collision-driven state transitions."""
 
-        del previous_state
-        return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32) + state.reward_delta
+        score_gained = jnp.maximum(state.score - previous_state.score, 0)
+        diamonds_collected = jnp.where(
+            state.collected_diamond,
+            jnp.floor_divide(score_gained, self.consts.SCORE_DIAMOND),
+            0,
+        )
+        lives_lost = jnp.maximum(previous_state.lives - state.lives, 0)
+
+        return (
+            jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+            + diamonds_collected.astype(jnp.float32) * self.consts.REWARD_DIAMOND
+            + lives_lost.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE
+        )
 
     def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
@@ -1207,23 +1276,22 @@ class JamesBondRenderer(JAXGameRenderer):
         config: render_utils.RendererConfig = None,
     ):
         self.consts = consts or JamesBondConstants()
-        super().__init__(self.consts)
-
         if config is None:
             config = render_utils.RendererConfig(
                 game_dimensions=(self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH),
                 channels=3,
                 downscale=None,
             )
-        else:
-            self.config = config
-
+        super().__init__(self.consts, config)
+        self.config = config
         self.jr = render_utils.JaxRenderingUtils(self.config)
 
         sprite_path = os.path.join(render_utils.get_base_sprite_dir(), "jamesbond")
         asset_config = list(self.consts.ASSET_CONFIG)
         if not self._asset_files_exist(asset_config, sprite_path):
-            sprite_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "jb_sprites")
+            sprite_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "jb_sprites"
+            )
             asset_config = self._get_packaged_asset_config()
 
         (
@@ -1231,7 +1299,7 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS,
             self.BACKGROUND,
             self.COLOR_TO_ID,
-            self.FLIP_OFFSETS
+            self.FLIP_OFFSETS,
         ) = self.jr.load_and_setup_assets(asset_config, sprite_path)
 
     @staticmethod
@@ -1246,7 +1314,10 @@ class JamesBondRenderer(JAXGameRenderer):
             if "pattern" in asset:
                 required_files.extend(asset["pattern"].format(i) for i in range(10))
 
-        return all(os.path.isfile(os.path.join(sprite_path, name)) for name in required_files)
+        return all(
+            os.path.isfile(os.path.join(sprite_path, name))
+            for name in required_files
+        )
 
     def _get_packaged_asset_config(self) -> list:
         """Adapt the asset config to the JamesBond sprites shipped in the repo."""
@@ -1274,7 +1345,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
     @staticmethod
     def _create_fallback_score_digits() -> jnp.ndarray:
-        """Create a compact RGBA digit set when extracted score sprites are incomplete."""
+        """Create compact RGBA digits when extracted score sprites are incomplete."""
 
         digit_rows = (
             ("111", "101", "101", "101", "111"),
@@ -1289,35 +1360,48 @@ class JamesBondRenderer(JAXGameRenderer):
             ("111", "101", "111", "001", "111"),
         )
         masks = jnp.array(
-            [[[int(pixel) for pixel in row] for row in digit] for digit in digit_rows],
+            [
+                [[int(pixel) for pixel in row] for row in digit]
+                for digit in digit_rows
+            ],
             dtype=jnp.uint8,
         )
         rgba = jnp.zeros((*masks.shape, 4), dtype=jnp.uint8)
         rgba = rgba.at[:, :, :, :3].set(masks[:, :, :, None] * 255)
         return rgba.at[:, :, :, 3].set(masks * 255)
 
-
     @partial(jax.jit, static_argnums=(0,))
     def render(self, state: JamesBondState) -> jnp.ndarray:
-        """Render a simple background, inactive object slots, and player box."""
+        """Render the JamesBond game state."""
 
-        raster = self.jr.create_object_raster(self.BACKGROUND) ## TODO: Render ground, maybe as part of background?
+        raster = self.jr.create_object_raster(self.BACKGROUND)
 
         raster = self._render_car(raster, state)
         raster = self._render_diamond(raster, state)
         raster = self._render_pit(raster, state)
         raster = self._render_helicopter(raster, state)
         raster = self._render_satellite(raster, state)
-
         raster = self._render_bullets(raster, state)
 
-        ## Render life counter
-        raster = self.jr.render_indicator(raster, 9, 184, state.lives, self.SHAPE_MASKS['life'], 16, 3) ## TODO: Maybe 5 like in ALE?
-        
-        ## Render Score counter
-        score_digits = self.jr.int_to_digits(state.score, 4) ## TODO: Max score 4 digits?
-        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 4) ## TODO: Position offset per digit?
-
+        raster = self.jr.render_indicator(
+            raster,
+            9,
+            184,
+            state.lives,
+            self.SHAPE_MASKS["life"],
+            16,
+            self.consts.MAX_LIVES,
+        )
+        score_digits = self.jr.int_to_digits(state.score, 4)
+        raster = self.jr.render_label(
+            raster,
+            95,
+            15,
+            score_digits,
+            self.SHAPE_MASKS["score_digits"],
+            8,
+            4,
+        )
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray:
@@ -1338,103 +1422,113 @@ class JamesBondRenderer(JAXGameRenderer):
         )
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
-    def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement death animation
+    def _render_car(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
         """Draw the player car."""
 
         return self.jr.render_at_clipped(
-            raster, 
-            state.player_x, 
-            state.player_y, 
-            self.SHAPE_MASKS['car']
-        )
-    
-    def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the diamond."""
-
-        sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
-            0,
-            1
+            raster,
+            state.player_x,
+            state.player_y,
+            self.SHAPE_MASKS["car"],
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.diamond_x, 
-            state.diamond_y, 
-            self.SHAPE_MASKS['diamond'][sprite_idx],
+    def _render_diamond(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
+        """Draw active diamonds."""
+
+        sprite_idx = (state.step_count % 2).astype(jnp.int32)
+        return self._render_sprite_group(
+            raster,
+            state.diamond_x,
+            state.diamond_y,
+            state.diamond_active,
+            self.SHAPE_MASKS["diamond"][sprite_idx],
         )
 
-        return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
-    
-    def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the fire pit."""
+    def _render_pit(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
+        """Draw active fire pits."""
 
-        sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
-            0,
-            1
+        sprite_idx = (state.step_count % 2).astype(jnp.int32)
+        return self._render_sprite_group(
+            raster,
+            state.firepit_x,
+            jnp.full_like(state.firepit_x, self.consts.FIREPIT_Y),
+            state.firepit_active,
+            self.SHAPE_MASKS["pit"][sprite_idx],
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.pit_x, 
-            state.pit_y, 
-            self.SHAPE_MASKS['pit'][sprite_idx],
+    def _render_helicopter(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
+        """Draw active helicopters."""
+
+        sprite_idx = (state.step_count % 2).astype(jnp.int32)
+        return self._render_sprite_group(
+            raster,
+            state.helicopter_x,
+            state.helicopter_y,
+            state.helicopter_active,
+            self.SHAPE_MASKS["helicopter"][sprite_idx],
         )
 
-        return jax.lax.cond(state.pit_active, draw_fn, lambda r: r, raster)
-    
-    def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
-        """Draw the helicopter."""
+    def _render_satellite(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
+        """Draw active satellites."""
 
-        sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
-            0,
-            1
+        return self._render_sprite_group(
+            raster,
+            state.satellite_x,
+            state.satellite_y,
+            state.satellite_active,
+            self.SHAPE_MASKS["satellite"],
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.helicopter_x, 
-            state.helicopter_y, 
-            self.SHAPE_MASKS['helicopter'][sprite_idx],
+    def _render_bullets(
+        self, raster: jnp.ndarray, state: JamesBondState
+    ) -> jnp.ndarray:
+        """Draw enemy bombs and the player bullet."""
+
+        raster = self._render_sprite_group(
+            raster,
+            state.bullet_x,
+            state.bullet_y,
+            state.bullet_active,
+            self.SHAPE_MASKS["bullet"],
+        )
+        return lax.cond(
+            state.player_bullet_active,
+            lambda r: self.jr.render_at_clipped(
+                r,
+                state.player_bullet_x,
+                state.player_bullet_y,
+                self.SHAPE_MASKS["bullet"],
+            ),
+            lambda r: r,
+            raster,
         )
 
-        return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
-    
-    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation
-        """Draw the satellite."""
+    def _render_sprite_group(
+        self,
+        raster: jnp.ndarray,
+        x: chex.Array,
+        y: chex.Array,
+        active: chex.Array,
+        sprite: chex.Array,
+    ) -> jnp.ndarray:
+        """Draw each active slot without using an array as a cond predicate."""
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.satellite_x, 
-            state.satellite_y, 
-            self.SHAPE_MASKS['satellite'],
-        )
-
-        return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
-    
-    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
-        """Draw all bullets."""
-        
-        active_bullets = jnp.array([
-            state.player_bullet_active, ## TODO: Add helicopter and satellite bullets.
-        ])
-
-        bullet_positions = jnp.vstack([
-            jnp.stack([state.player_bullet_x, state.player_bullet_y]), ## TODO: Add helicopter and satellite bullets.
-        ])
-
-        def render_single_bullet(i, current_raster):
-            should_draw = (active_bullets[i] == 1)
-
-            draw_fn = lambda r: self.jr.render_at_clipped(
-                r, 
-                bullet_positions[i][0], 
-                bullet_positions[i][1], 
-                self.SHAPE_MASKS['bullet'],
+        def render_slot(i, current_raster):
+            return lax.cond(
+                active[i],
+                lambda r: self.jr.render_at_clipped(r, x[i], y[i], sprite),
+                lambda r: r,
+                current_raster,
             )
 
-            return jax.lax.cond(should_draw, draw_fn, lambda r: r, current_raster)
-
-        return jax.lax.fori_loop(0, jnp.size(active_bullets), render_single_bullet, raster)
+        return lax.fori_loop(0, active.shape[0], render_slot, raster)
