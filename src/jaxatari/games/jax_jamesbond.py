@@ -21,10 +21,64 @@ from jaxatari.environment import JaxEnvironment, ObjectObservation
 from jaxatari.renderers import JAXGameRenderer
 from jaxatari.rendering import jax_rendering_utils as render_utils
 
+## Sprites live in the repo (src/jaxatari/jb_sprites), not in the downloaded
+## sprite pack, so the renderer must load them from here.
+JB_SPRITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "jb_sprites")
+
+
+def _black_background() -> jnp.ndarray:
+    """All-black opaque 210x160 background (no background.npy extracted yet)."""
+
+    background = jnp.zeros((210, 160, 4), dtype=jnp.uint8)
+    return background.at[..., 3].set(255)
+
+
+def _bullet_sprite() -> jnp.ndarray:
+    """1x4 player bullet placeholder (no bullet.npy extracted yet)."""
+
+    bullet = jnp.zeros((4, 1, 4), dtype=jnp.uint8)
+    return bullet.at[..., :].set(jnp.array([250, 220, 72, 255], dtype=jnp.uint8))
+
+
+def _score_digit_sprites() -> jnp.ndarray:
+    """Digits 0-5 from the extracted sprites plus procedural 6-9.
+
+    score_6..9.npy have not been extracted yet, so the missing digits are
+    drawn with a small 5x7 font at the same (7, 6) size. TODO: Replace once
+    the real digits are extracted.
+    """
+
+    digits = []
+    for i in range(6):
+        digit = jnp.load(os.path.join(JB_SPRITE_DIR, f"score_{i}.npy"))
+        ## score_1.npy is narrower than the others; pad every digit to (7, 6)
+        ## with transparent pixels so they stack into one array.
+        pad_cols = 6 - digit.shape[1]
+        if pad_cols > 0:
+            digit = jnp.pad(digit, ((0, 0), (0, pad_cols), (0, 0)))
+        digits.append(digit)
+    font_6_to_9 = [
+        ["#####", "#....", "#....", "#####", "#...#", "#...#", "#####"],
+        ["#####", "....#", "....#", "...#.", "..#..", "..#..", "..#.."],
+        ["#####", "#...#", "#...#", "#####", "#...#", "#...#", "#####"],
+        ["#####", "#...#", "#...#", "#####", "....#", "....#", "#####"],
+    ]
+    for pattern in font_6_to_9:
+        digit = jnp.zeros((7, 6, 4), dtype=jnp.uint8)
+        for row, line in enumerate(pattern):
+            for col, char in enumerate(line):
+                if char == "#":
+                    digit = digit.at[row, col].set(
+                        jnp.array([236, 236, 236, 255], dtype=jnp.uint8)
+                    )
+        digits.append(digit)
+    return jnp.stack(digits)
+
+
 def get_default_asset_config() -> tuple:
         asset_config = [
-            {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Need to create background all black sprite?
-            {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
+            {'name': 'background', 'type': 'background', 'data': _black_background()}, ## TODO: Extract a real background sprite
+            {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
             {'name': 'car', 'type': 'single', 'file': 'car.npy'},
             {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
             {
@@ -44,19 +98,19 @@ def get_default_asset_config() -> tuple:
                 'files': ['diamond_1.npy', 'diamond_2.npy']
             },
             {
-                'name': 'stars', 'type': 'group', 
+                'name': 'stars', 'type': 'group',
                 'files': ['stars_1.npy', 'stars_2.npy']
              },
 
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
-            
+
             {
                 'name': 'score_digits', 'type': 'digits',
-                'pattern': 'score_{}.npy' ## TODO: Add digits 6-9
+                'data': _score_digit_sprites()
             },
             {
                 'name': 'bullet', 'type': 'single', ## TODO: All bullets the same sprite?
-                'file': 'bullet.npy'
+                'data': _bullet_sprite()
             }
         ]
         return asset_config
@@ -123,9 +177,10 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ## The player shot vanishes just above the row of the highest on-screen
-    ## object (diamond/helicopter/satellite), like in the original game.
-    BULLET_DESPAWN_MARGIN: int = struct.field(pytree_node=False, default=4)
+    ## Fire pit sprite size as loaded from fire_pit_*.npy.
+    ## TODO: The npy looks stored transposed (48x16); revisit with the sprite team.
+    PIT_WIDTH: int = struct.field(pytree_node=False, default=16)
+    PIT_HEIGHT: int = struct.field(pytree_node=False, default=48)
 
     # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
     PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
@@ -784,26 +839,6 @@ class JaxJamesBond(
             player_bullet_active
         )
 
-        ## Original: the shot disappears once it crosses just above the row of
-        ## the highest active object (diamond, helicopter or satellite). With
-        ## no objects on screen the step-30 lifetime above is the only limit.
-        object_rows = jnp.concatenate([
-            jnp.where(state.diamond_active, state.diamond_y, jnp.inf),
-            jnp.where(state.helicopter_active, state.helicopter_y, jnp.inf),
-            jnp.where(state.satellite_active, state.satellite_y, jnp.inf),
-        ])
-        has_objects = jnp.any(jnp.isfinite(object_rows))
-        despawn_line = jnp.where(
-            has_objects,
-            jnp.min(object_rows) - self.consts.BULLET_DESPAWN_MARGIN,
-            -jnp.inf,
-        )
-        player_bullet_active = jnp.where(
-            player_bullet_y < despawn_line,
-            False,
-            player_bullet_active
-        )
-
         return state.replace( ## TODO: Use state.replace or output just the values?
             player_x = player_x.astype(jnp.float32),
             player_y = player_y.astype(jnp.float32),
@@ -951,23 +986,19 @@ class JaxJamesBond(
         ## Fire pit
         ## TODO: The spawn of fire pit is a little bit complicated, first one spawn at x=124, but from the next one it will spawn at GAME_AREA_MAX_X, and the next one always spawn even the previous one is still on screen(as far as i checked, after the yellow part of fire pit disappears on GAME_AREA_MIN_X)
         ## TODO: Now i apply the same logic as enemy and diamond, which is only spawn when the entire row is empty, will change it after we discuss about it
-        available_pit_idx = jnp.argmin(next_pit_active) ## Get the first inactive pit index
-        can_spawn_pit = ~jnp.any(next_pit_active) ## Only spawn if the chosen index is inactive
-        # Apply new active status, position coordinates for spawned pits
-        next_pit_active = next_pit_active.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      True,
-                      next_pit_active[available_pit_idx])
+        ## The pit is a single scalar object (see reset and _render_pit), so
+        ## spawn with plain jnp.where instead of array indexing.
+        can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
+        next_pit_active = jnp.logical_or(next_pit_active, can_spawn_pit)
+        next_pit_x = jnp.where(
+            can_spawn_pit,
+            self.consts.GAME_AREA_MAX_X,
+            next_pit_x
         )
-        next_pit_x = next_pit_x.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      self.consts.GAME_AREA_MAX_X,
-                      next_pit_x[available_pit_idx])
-        )
-        next_pit_y = next_pit_y.at[available_pit_idx].set(
-            jnp.where(can_spawn_pit,
-                      122.0, ## TODO: Pit spawn height, will change if the number is wrong
-                      next_pit_y[available_pit_idx])
+        next_pit_y = jnp.where(
+            can_spawn_pit,
+            122, ## TODO: Pit spawn height, will change if the number is wrong
+            next_pit_y
         )
 
         return state.replace(
@@ -1238,12 +1269,13 @@ class JamesBondRenderer(JAXGameRenderer):
                 channels=3,
                 downscale=None,
             )
-        else:
-            self.config = config
+        self.config = config
 
         self.jr = render_utils.JaxRenderingUtils(self.config)
 
-        sprite_path = os.path.join(render_utils.get_base_sprite_dir(), "jamesbond")
+        ## The jamesbond sprites are committed in the repo, not part of the
+        ## downloadable sprite pack, so load them from jb_sprites directly.
+        sprite_path = JB_SPRITE_DIR
 
         (
             self.PALETTE,
@@ -1306,7 +1338,7 @@ class JamesBondRenderer(JAXGameRenderer):
         )
     
     def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the diamond."""
+        """Draw every active diamond (diamond state is a fixed-size array)."""
 
         sprite_idx = jnp.where(
             state.step_count % 2 == 0,
@@ -1314,14 +1346,16 @@ class JamesBondRenderer(JAXGameRenderer):
             1
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.diamond_x, 
-            state.diamond_y, 
-            self.SHAPE_MASKS['diamond'][sprite_idx],
-        )
+        def render_single_diamond(i, current_raster):
+            draw_fn = lambda r: self.jr.render_at_clipped(
+                r,
+                state.diamond_x[i].astype(jnp.int32),
+                state.diamond_y[i].astype(jnp.int32),
+                self.SHAPE_MASKS['diamond'][sprite_idx],
+            )
+            return jax.lax.cond(state.diamond_active[i], draw_fn, lambda r: r, current_raster)
 
-        return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
+        return jax.lax.fori_loop(0, self.consts.MAX_DIAMONDS, render_single_diamond, raster)
     
     def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the fire pit."""
@@ -1342,7 +1376,7 @@ class JamesBondRenderer(JAXGameRenderer):
         return jax.lax.cond(state.pit_active, draw_fn, lambda r: r, raster)
     
     def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
-        """Draw the helicopter."""
+        """Draw every active helicopter (helicopter state is a fixed-size array)."""
 
         sprite_idx = jnp.where(
             state.step_count % 2 == 0,
@@ -1350,26 +1384,30 @@ class JamesBondRenderer(JAXGameRenderer):
             1
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.helicopter_x, 
-            state.helicopter_y, 
-            self.SHAPE_MASKS['helicopter'][sprite_idx],
-        )
+        def render_single_helicopter(i, current_raster):
+            draw_fn = lambda r: self.jr.render_at_clipped(
+                r,
+                state.helicopter_x[i].astype(jnp.int32),
+                state.helicopter_y[i].astype(jnp.int32),
+                self.SHAPE_MASKS['helicopter'][sprite_idx],
+            )
+            return jax.lax.cond(state.helicopter_active[i], draw_fn, lambda r: r, current_raster)
 
-        return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
-    
+        return jax.lax.fori_loop(0, self.consts.MAX_HELICOPTERS, render_single_helicopter, raster)
+
     def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation
-        """Draw the satellite."""
+        """Draw every active satellite (satellite state is a fixed-size array)."""
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
-            r, 
-            state.satellite_x, 
-            state.satellite_y, 
-            self.SHAPE_MASKS['satellite'],
-        )
+        def render_single_satellite(i, current_raster):
+            draw_fn = lambda r: self.jr.render_at_clipped(
+                r,
+                state.satellite_x[i].astype(jnp.int32),
+                state.satellite_y[i].astype(jnp.int32),
+                self.SHAPE_MASKS['satellite'],
+            )
+            return jax.lax.cond(state.satellite_active[i], draw_fn, lambda r: r, current_raster)
 
-        return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
+        return jax.lax.fori_loop(0, self.consts.MAX_SATELLITES, render_single_satellite, raster)
     
     def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
         """Draw all bullets."""
