@@ -1221,10 +1221,6 @@ class JamesBondRenderer(JAXGameRenderer):
         self.jr = render_utils.JaxRenderingUtils(self.config)
 
         sprite_path = os.path.join(render_utils.get_base_sprite_dir(), "jamesbond")
-        asset_config = list(self.consts.ASSET_CONFIG)
-        if not self._asset_files_exist(asset_config, sprite_path):
-            sprite_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "jb_sprites")
-            asset_config = self._get_packaged_asset_config()
 
         (
             self.PALETTE,
@@ -1232,69 +1228,7 @@ class JamesBondRenderer(JAXGameRenderer):
             self.BACKGROUND,
             self.COLOR_TO_ID,
             self.FLIP_OFFSETS
-        ) = self.jr.load_and_setup_assets(asset_config, sprite_path)
-
-    @staticmethod
-    def _asset_files_exist(asset_config: list, sprite_path: str) -> bool:
-        """Return whether every file-based asset is present in sprite_path."""
-
-        required_files = []
-        for asset in asset_config:
-            if "file" in asset:
-                required_files.append(asset["file"])
-            required_files.extend(asset.get("files", ()))
-            if "pattern" in asset:
-                required_files.extend(asset["pattern"].format(i) for i in range(10))
-
-        return all(os.path.isfile(os.path.join(sprite_path, name)) for name in required_files)
-
-    def _get_packaged_asset_config(self) -> list:
-        """Adapt the asset config to the JamesBond sprites shipped in the repo."""
-
-        background = jnp.zeros(
-            (self.consts.SCREEN_HEIGHT, self.consts.SCREEN_WIDTH, 4),
-            dtype=jnp.uint8,
-        ).at[:, :, 3].set(255)
-
-        asset_config = [dict(asset) for asset in self.consts.ASSET_CONFIG]
-        for asset in asset_config:
-            name = asset.get("name")
-            if name == "background":
-                asset.pop("file", None)
-                asset["data"] = background
-            elif name == "ground":
-                asset["file"] = "ground_unkempt.npy"
-            elif name == "score_digits":
-                asset.pop("pattern", None)
-                asset["data"] = self._create_fallback_score_digits()
-            elif name == "bullet":
-                asset["file"] = "satellite_shot.npy"
-
-        return asset_config
-
-    @staticmethod
-    def _create_fallback_score_digits() -> jnp.ndarray:
-        """Create a compact RGBA digit set when extracted score sprites are incomplete."""
-
-        digit_rows = (
-            ("111", "101", "101", "101", "111"),
-            ("010", "110", "010", "010", "111"),
-            ("111", "001", "111", "100", "111"),
-            ("111", "001", "111", "001", "111"),
-            ("101", "101", "111", "001", "001"),
-            ("111", "100", "111", "001", "111"),
-            ("111", "100", "111", "101", "111"),
-            ("111", "001", "010", "010", "010"),
-            ("111", "101", "111", "101", "111"),
-            ("111", "101", "111", "001", "111"),
-        )
-        masks = jnp.array(
-            [[[int(pixel) for pixel in row] for row in digit] for digit in digit_rows],
-            dtype=jnp.uint8,
-        )
-        rgba = jnp.zeros((*masks.shape, 4), dtype=jnp.uint8)
-        rgba = rgba.at[:, :, :, :3].set(masks[:, :, :, None] * 255)
-        return rgba.at[:, :, :, 3].set(masks * 255)
+        ) = self.jr.load_and_setup_assets(self.consts.ASSET_CONFIG, sprite_path)
 
 
     @partial(jax.jit, static_argnums=(0,))

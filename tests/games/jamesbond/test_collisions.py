@@ -9,7 +9,6 @@ import jax.numpy as jnp
 import pytest
 
 from jaxatari.games.jax_jamesbond import JaxJamesBond
-from jaxatari.rendering import jax_rendering_utils as render_utils
 
 NOOP = 0
 FIRE = 1
@@ -30,17 +29,6 @@ def _clean_state(env, state):
         firepit_active=jnp.zeros_like(state.firepit_active),
         bullet_active=jnp.zeros_like(state.bullet_active),
     )
-
-
-def test_renderer_uses_packaged_assets_without_sprite_install(monkeypatch, tmp_path):
-    monkeypatch.setattr(render_utils, "get_base_sprite_dir", lambda: str(tmp_path))
-
-    fallback_env = JaxJamesBond()
-    _, state = fallback_env.reset(jax.random.PRNGKey(0))
-    frame = fallback_env.render(state)
-
-    assert frame.shape == fallback_env.image_space().shape
-    assert frame.dtype == jnp.uint8
 
 
 def test_player_bullet_position_persists(env):
