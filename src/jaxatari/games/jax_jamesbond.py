@@ -1009,9 +1009,9 @@ class JaxJamesBond(
     def _resolve_firepit_player_collisions(self, state: JamesBondState) -> JamesBondState:
         """Apply one life of damage when the player drives into a fire pit.
 
-        Only ground contact is deadly: a jumping player clears the pit. The
-        player bullet and helicopter bombs pass over pits without responding,
-        matching the original game, so no projectile checks happen here.
+        The pit is already positioned on the ground, so the AABB overlap alone
+        distinguishes ground contact from a jumping player clearing it. Player
+        bullets and helicopter bombs pass over pits without responding.
         """
 
         ## Center the smaller collision box inside the wider pit sprite so an
@@ -1029,10 +1029,8 @@ class JaxJamesBond(
             self.consts.FIREPIT_COLLISION_WIDTH,
             self.consts.FIREPIT_COLLISION_HEIGHT,
         )
-        on_ground = state.player_y >= self.consts.PLAYER_INIT_Y
-        firepit_collision = jnp.logical_and(
-            on_ground,
-            jnp.any(jnp.logical_and(state.firepit_active, overlaps)),
+        firepit_collision = jnp.any(
+            jnp.logical_and(state.firepit_active, overlaps)
         )
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(firepit_collision, can_take_damage)
