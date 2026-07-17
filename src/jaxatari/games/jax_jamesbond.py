@@ -23,61 +23,15 @@ from jaxatari.rendering import jax_rendering_utils as render_utils
 
 ## Sprites live in the repo (src/jaxatari/jb_sprites), not in the downloaded
 ## sprite pack, so the renderer must load them from here.
+## NOTE: background.npy, bullet.npy and score_6..9.npy are placeholder
+## sprites so the environment can run; the sprite task owner should replace
+## them with real extractions.
 JB_SPRITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "jb_sprites")
-
-
-def _black_background() -> jnp.ndarray:
-    """All-black opaque 210x160 background (no background.npy extracted yet)."""
-
-    background = jnp.zeros((210, 160, 4), dtype=jnp.uint8)
-    return background.at[..., 3].set(255)
-
-
-def _bullet_sprite() -> jnp.ndarray:
-    """1x4 player bullet placeholder (no bullet.npy extracted yet)."""
-
-    bullet = jnp.zeros((4, 1, 4), dtype=jnp.uint8)
-    return bullet.at[..., :].set(jnp.array([250, 220, 72, 255], dtype=jnp.uint8))
-
-
-def _score_digit_sprites() -> jnp.ndarray:
-    """Digits 0-5 from the extracted sprites plus procedural 6-9.
-
-    score_6..9.npy have not been extracted yet, so the missing digits are
-    drawn with a small 5x7 font at the same (7, 6) size. TODO: Replace once
-    the real digits are extracted.
-    """
-
-    digits = []
-    for i in range(6):
-        digit = jnp.load(os.path.join(JB_SPRITE_DIR, f"score_{i}.npy"))
-        ## score_1.npy is narrower than the others; pad every digit to (7, 6)
-        ## with transparent pixels so they stack into one array.
-        pad_cols = 6 - digit.shape[1]
-        if pad_cols > 0:
-            digit = jnp.pad(digit, ((0, 0), (0, pad_cols), (0, 0)))
-        digits.append(digit)
-    font_6_to_9 = [
-        ["#####", "#....", "#....", "#####", "#...#", "#...#", "#####"],
-        ["#####", "....#", "....#", "...#.", "..#..", "..#..", "..#.."],
-        ["#####", "#...#", "#...#", "#####", "#...#", "#...#", "#####"],
-        ["#####", "#...#", "#...#", "#####", "....#", "....#", "#####"],
-    ]
-    for pattern in font_6_to_9:
-        digit = jnp.zeros((7, 6, 4), dtype=jnp.uint8)
-        for row, line in enumerate(pattern):
-            for col, char in enumerate(line):
-                if char == "#":
-                    digit = digit.at[row, col].set(
-                        jnp.array([236, 236, 236, 255], dtype=jnp.uint8)
-                    )
-        digits.append(digit)
-    return jnp.stack(digits)
 
 
 def get_default_asset_config() -> tuple:
         asset_config = [
-            {'name': 'background', 'type': 'background', 'data': _black_background()}, ## TODO: Extract a real background sprite
+            {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Placeholder, extract the real background sprite
             {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
             {'name': 'car', 'type': 'single', 'file': 'car.npy'},
             {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
@@ -106,11 +60,11 @@ def get_default_asset_config() -> tuple:
 
             {
                 'name': 'score_digits', 'type': 'digits',
-                'data': _score_digit_sprites()
+                'pattern': 'score_{}.npy' ## TODO: 6-9 are placeholders, extract the real digits
             },
             {
-                'name': 'bullet', 'type': 'single', ## TODO: All bullets the same sprite?
-                'data': _bullet_sprite()
+                'name': 'bullet', 'type': 'single', ## TODO: Placeholder, extract the real bullet sprite
+                'file': 'bullet.npy'
             }
         ]
         return asset_config
