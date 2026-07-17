@@ -87,13 +87,18 @@ class JamesBondConstants(struct.PyTreeNode):
     ## object (diamond/helicopter/satellite), like in the original game.
     BULLET_DESPAWN_MARGIN: int = struct.field(pytree_node=False, default=4)
 
-    # Collision boxes are separate from render sizes for future tuning. ## TODO: Why?
-    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)
-    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    # Collision boxes are kept a little smaller than the real sprite sizes so
+    # near-misses do not register, matching how the original game feels.
+    PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < PLAYER_WIDTH 8
+    PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=3)  ## < PLAYER_HEIGHT 4
+    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)  ## < DIAMOND_WIDTH 7
+    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < DIAMOND_HEIGHT 13
+    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=8)    ## < ENEMY_WIDTH 10
+    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=6)   ## < ENEMY_HEIGHT 8
+    HELICOPTER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)  ## < HELICOPTER_ENEMY_WIDTH 8
+    HELICOPTER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < HELICOPTER_ENEMY_HEIGHT 6
+    SATELLITE_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < SATELLITE_ENEMY_WIDTH 8
+    SATELLITE_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=12) ## < SATELLITE_ENEMY_HEIGHT 14
     BULLET_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: Only player?
     BULLET_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4)
 
@@ -110,6 +115,8 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_FIREPITS: int = struct.field(pytree_node=False, default=2)
     FIREPIT_WIDTH: int = struct.field(pytree_node=False, default=20) ## TODO: Tune against the original sprite (48px on the 160px screen)
     FIREPIT_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    FIREPIT_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=14) ## < FIREPIT_WIDTH 20, so an edge tap is survivable
+    FIREPIT_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < FIREPIT_HEIGHT 5
     FIREPIT_Y: int = struct.field(pytree_node=False, default=120) ## Ground row, just below the player top
     FIREPIT_SPEED: float = struct.field(pytree_node=False, default=0.75) ## Same as SPEED_R2L world scroll
 
@@ -1044,16 +1051,20 @@ class JaxJamesBond(
         matching the original game, so no projectile checks happen here.
         """
 
+        ## Center the smaller collision box inside the wider pit sprite so an
+        ## edge tap is survivable but driving into the middle is fatal.
+        firepit_inset = (self.consts.FIREPIT_WIDTH - self.consts.FIREPIT_COLLISION_WIDTH) / 2
+        firepit_cx = state.firepit_x + firepit_inset
         firepit_y = jnp.full_like(state.firepit_x, self.consts.FIREPIT_Y)
         overlaps = _aabb_overlap(
             state.player_x,
             state.player_y,
             self.consts.PLAYER_COLLISION_WIDTH,
             self.consts.PLAYER_COLLISION_HEIGHT,
-            state.firepit_x,
+            firepit_cx,
             firepit_y,
-            self.consts.FIREPIT_WIDTH,
-            self.consts.FIREPIT_HEIGHT,
+            self.consts.FIREPIT_COLLISION_WIDTH,
+            self.consts.FIREPIT_COLLISION_HEIGHT,
         )
         on_ground = state.player_y >= self.consts.PLAYER_INIT_Y
         firepit_collision = jnp.logical_and(
@@ -1128,8 +1139,8 @@ class JaxJamesBond(
             self.consts.PLAYER_COLLISION_HEIGHT,
             state.helicopter_x,
             state.helicopter_y,
-            self.consts.HELICOPTER_ENEMY_WIDTH,
-            self.consts.HELICOPTER_ENEMY_HEIGHT,
+            self.consts.HELICOPTER_COLLISION_WIDTH,
+            self.consts.HELICOPTER_COLLISION_HEIGHT,
         )
         satellite_overlaps = _aabb_overlap(
             state.player_x,
@@ -1138,8 +1149,8 @@ class JaxJamesBond(
             self.consts.PLAYER_COLLISION_HEIGHT,
             state.satellite_x,
             state.satellite_y,
-            self.consts.SATELLITE_ENEMY_WIDTH,
-            self.consts.SATELLITE_ENEMY_HEIGHT,
+            self.consts.SATELLITE_COLLISION_WIDTH,
+            self.consts.SATELLITE_COLLISION_HEIGHT,
         )
 
         hazard_collision = jnp.logical_or(
