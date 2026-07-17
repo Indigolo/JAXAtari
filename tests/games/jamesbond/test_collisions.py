@@ -149,26 +149,28 @@ def test_bullet_passes_through_helicopter(env):
     assert bool(state.player_bullet_active)
 
 
-def test_bullet_despawns_after_30_frames(env):
-    """The shot lifetime is controlled only by its 30-frame counter."""
+def test_bullet_despawns_above_highest_object_row(env):
+    """The shot vanishes just above the highest active object's row."""
 
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
+        diamond_active=state.diamond_active.at[0].set(True),
+        diamond_x=state.diamond_x.at[0].set(10.0),
+        diamond_y=state.diamond_y.at[0].set(57.0),
         player_bullet_active=jnp.array(True),
-        player_bullet_step=jnp.array(0),
+        player_bullet_step=jnp.array(2),
         player_bullet_x=jnp.array(40),
-        player_bullet_y=jnp.array(100),
+        player_bullet_y=jnp.array(63),
     )
-
-    atari_noop = env._decode_action(jnp.array(NOOP))
-    for _ in range(29):
-        state = env._step_player(state, atari_noop)
-        assert bool(state.player_bullet_active)
-
-    state = env._step_player(state, atari_noop)
+    despawn_line = 57.0 - env.consts.BULLET_DESPAWN_MARGIN
+    for _ in range(10):
+        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+        if not bool(state.player_bullet_active):
+            break
+        # While alive the bullet must still be at or below the despawn line.
+        assert float(state.player_bullet_y) >= despawn_line - 2.0
     assert not bool(state.player_bullet_active)
-    assert int(state.player_bullet_step) == 30
 
 
 def test_helicopter_contact_costs_one_life(env):
