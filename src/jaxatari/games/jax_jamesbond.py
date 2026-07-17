@@ -554,7 +554,11 @@ class JaxJamesBond(
             state.bullet_active,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            orientation=jnp.where(state.bullet_vx < 0, 270.0, 90.0),
+            ## bullet_vx is a scalar, so broadcast the orientation to one value
+            ## per bullet slot or the observation loses features vs the space.
+            orientation=jnp.broadcast_to(
+                jnp.where(state.bullet_vx < 0, 270.0, 90.0), state.bullet_x.shape
+            ),
         )
         return JamesBondObservation(
             player=player,
@@ -585,9 +589,15 @@ class JaxJamesBond(
         if orientation is None: ## TODO: Maybe remove if not needed
             orientation = jnp.zeros_like(x, dtype=jnp.float32)
 
+        ## Inactive objects keep drifting in _update_objects_placeholder, so
+        ## their stale coordinates can leave the screen bounds. Zero them out
+        ## and clamp active ones so the observation stays inside its space.
+        safe_x = jnp.where(active, jnp.clip(x, 0, self.consts.SCREEN_WIDTH), 0.0)
+        safe_y = jnp.where(active, jnp.clip(y, 0, self.consts.SCREEN_HEIGHT), 0.0)
+
         return ObjectObservation.create(
-            x=x,
-            y=y,
+            x=safe_x,
+            y=safe_y,
             width=jnp.full(x.shape, width, dtype=jnp.int32),
             height=jnp.full(y.shape, height, dtype=jnp.int32),
             active=active,
