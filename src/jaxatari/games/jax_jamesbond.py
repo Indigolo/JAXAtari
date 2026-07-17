@@ -93,8 +93,6 @@ class JamesBondConstants(struct.PyTreeNode):
     PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=3)  ## < PLAYER_HEIGHT 4
     DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)  ## < DIAMOND_WIDTH 7
     DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < DIAMOND_HEIGHT 13
-    ENEMY_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=8)    ## < ENEMY_WIDTH 10
-    ENEMY_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=6)   ## < ENEMY_HEIGHT 8
     HELICOPTER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)  ## < HELICOPTER_ENEMY_WIDTH 8
     HELICOPTER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < HELICOPTER_ENEMY_HEIGHT 6
     SATELLITE_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < SATELLITE_ENEMY_WIDTH 8
@@ -1247,15 +1245,10 @@ class JaxJamesBond(
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
         ## In the original game the bullet passes straight through helicopters
         ## and satellites without any visible response: the diamond is the
-        ## only object the player bullet collides with.
-        check_collisions = jnp.where(
-            state.player_bullet_active,
-            True,
-            False
-        )
-
+        ## only object the player bullet collides with, so only that check
+        ## runs, and only while a bullet is in flight.
         return lax.cond(
-            check_collisions,
+            state.player_bullet_active,
             self.collectible_collisions_logic,
             lambda s: s,
             state
