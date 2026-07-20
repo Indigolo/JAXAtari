@@ -63,7 +63,7 @@ def get_default_asset_config() -> tuple:
                 'pattern': 'score_{}.npy' ## TODO: 6-9 are placeholders, extract the real digits
             },
             {
-                'name': 'bullet', 'type': 'single', ## TODO: Placeholder, extract the real bullet sprite
+                'name': 'bullet', 'type': 'single', ## TODO: Placeholder, extract the real bullet sprite. Comment: What? no it's not, it's the real bullet sprite
                 'file': 'bullet.npy'
             }
         ]
@@ -101,7 +101,7 @@ class JamesBondConstants(struct.PyTreeNode):
     PLAYER_WIDTH: int = struct.field(pytree_node=False, default=8)
     PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=4)
     PLAYER_INIT_X: int = struct.field(pytree_node=False, default=29) ## 30 if starting with 1
-    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=119) ## 120 if starting with 1
+    PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=119) ## 120 if starting with 1 (Not 122?)
     PLAYER_IN_AIR_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
         0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, ## TODO: Remove first zero?
         0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0,
@@ -1029,7 +1029,7 @@ class JaxJamesBond(
             bullet_active=next_bomb_active,
         )
 
-    def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState:
+    def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
         # Future diamond, enemy, bullet, and life collision logic belongs here.
         state = state.replace(
             collected_diamond=jnp.array(False, dtype=jnp.bool_),
@@ -1052,14 +1052,14 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
-        state = self._resolve_bomb_player_collisions(state)
+        state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
-        return self._resolve_player_hazard_collisions(state)
+        return state
 
-    def _resolve_bomb_player_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Apply one life of damage when a helicopter bomb hits the player.
+    def _resolve_bullet_player_collisions(self, state: JamesBondState) -> JamesBondState: ## TODO: Make into multi-bullet
+        """Apply one life of damage when a helicopter bullet hits the player.
 
-        The bomb always detonates (deactivates) on contact; the life is only
+        The bullet always deactivates on contact; the life is only
         lost when the hit cooldown has expired, mirroring the hazard rule.
         """
 
@@ -1073,7 +1073,7 @@ class JaxJamesBond(
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
         )
-        bomb_hits = jnp.logical_and(state.bullet_active, overlaps)
+        hits = jnp.logical_and(state.bullet_active, overlaps)
         hit_any = jnp.any(bomb_hits)
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hit_any, can_take_damage)
@@ -1109,7 +1109,7 @@ class JaxJamesBond(
             state.player_x < pit_right,
             state.player_x + self.consts.PLAYER_COLLISION_WIDTH > pit_left,
         )
-        on_ground = state.player_y >= self.consts.PLAYER_INIT_Y
+        on_ground = (state.player_y == self.consts.PLAYER_INIT_Y)
         pit_collision = jnp.logical_and(
             state.pit_active, jnp.logical_and(on_ground, x_overlap)
         )
@@ -1125,49 +1125,6 @@ class JaxJamesBond(
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
-        )
-
-    def _resolve_player_hazard_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Apply one life of damage when the player touches an active enemy."""
-
-        helicopter_overlaps = _aabb_overlap(
-            state.player_x,
-            state.player_y,
-            self.consts.PLAYER_COLLISION_WIDTH,
-            self.consts.PLAYER_COLLISION_HEIGHT,
-            state.helicopter_x,
-            state.helicopter_y,
-            self.consts.HELICOPTER_COLLISION_WIDTH,
-            self.consts.HELICOPTER_COLLISION_HEIGHT,
-        )
-        satellite_overlaps = _aabb_overlap(
-            state.player_x,
-            state.player_y,
-            self.consts.PLAYER_COLLISION_WIDTH,
-            self.consts.PLAYER_COLLISION_HEIGHT,
-            state.satellite_x,
-            state.satellite_y,
-            self.consts.SATELLITE_COLLISION_WIDTH,
-            self.consts.SATELLITE_COLLISION_HEIGHT,
-        )
-
-        hazard_collision = jnp.logical_or(
-            jnp.any(jnp.logical_and(state.helicopter_active, helicopter_overlaps)),
-            jnp.any(jnp.logical_and(state.satellite_active, satellite_overlaps)),
-        )
-        can_take_damage = state.hit_cooldown <= 0
-        took_damage = jnp.logical_and(hazard_collision, can_take_damage)
-
-        return state.replace(
-            lives=jnp.maximum(
-                0, state.lives - took_damage.astype(jnp.int32)
-            ).astype(jnp.int32),
-            hit_cooldown=jnp.where(
-                took_damage,
-                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
-                state.hit_cooldown,
-            ),
-            hit_enemy=jnp.logical_or(state.hit_enemy, hazard_collision), ## TODO: There are 5 lives in ALE
         )
 
     def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
@@ -1221,14 +1178,14 @@ class JaxJamesBond(
         )
 
         return state.replace(
-            diamond_active = jnp.logical_and(
+            diamond_active = jnp.logical_and( ## TODO: change diamond x and y?
                 state.diamond_active, ~collected
             ),
             player_bullet_active=player_bullet_active,
             player_bullet_step=player_bullet_step,
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
-            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
+            score=state.score + self.consts.SCORE_DIAMOND,
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
@@ -1244,7 +1201,7 @@ class JaxJamesBond(
             state
         )
 
-    def _get_reward(
+    def _get_reward( ## TODO: Wrong logic
         self, previous_state: JamesBondState, state: JamesBondState
     ) -> chex.Array:
         """Calculate reward from collision-driven state transitions."""
@@ -1327,7 +1284,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return self.jr.render_from_palette(raster, self.PALETTE)
 
-    def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray:
+    def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray: ## TODO: Turn to ground renderer
         """Draw the placeholder play area."""
 
         position = jnp.array(
@@ -1364,16 +1321,14 @@ class JamesBondRenderer(JAXGameRenderer):
             1
         )
 
-        def render_single_diamond(i, current_raster):
-            draw_fn = lambda r: self.jr.render_at_clipped(
-                r,
-                state.diamond_x[i].astype(jnp.int32),
-                state.diamond_y[i].astype(jnp.int32),
-                self.SHAPE_MASKS['diamond'][sprite_idx],
-            )
-            return jax.lax.cond(state.diamond_active[i], draw_fn, lambda r: r, current_raster)
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.diamond_x,
+            state.diamond_y,
+            self.SHAPE_MASKS['diamond'][sprite_idx],
+        )
 
-        return jax.lax.fori_loop(0, self.consts.MAX_DIAMONDS, render_single_diamond, raster)
+        return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
     
     def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the fire pit."""
@@ -1402,37 +1357,33 @@ class JamesBondRenderer(JAXGameRenderer):
             1
         )
 
-        def render_single_helicopter(i, current_raster):
-            draw_fn = lambda r: self.jr.render_at_clipped(
-                r,
-                state.helicopter_x[i].astype(jnp.int32),
-                state.helicopter_y[i].astype(jnp.int32),
-                self.SHAPE_MASKS['helicopter'][sprite_idx],
-            )
-            return jax.lax.cond(state.helicopter_active[i], draw_fn, lambda r: r, current_raster)
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.helicopter_x,
+            state.helicopter_y,
+            self.SHAPE_MASKS['helicopter'][sprite_idx],
+        )
 
-        return jax.lax.fori_loop(0, self.consts.MAX_HELICOPTERS, render_single_helicopter, raster)
+        return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
 
     def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation
         """Draw every active satellite (satellite state is a fixed-size array)."""
 
-        def render_single_satellite(i, current_raster):
-            draw_fn = lambda r: self.jr.render_at_clipped(
-                r,
-                state.satellite_x[i].astype(jnp.int32),
-                state.satellite_y[i].astype(jnp.int32),
-                self.SHAPE_MASKS['satellite'],
-            )
-            return jax.lax.cond(state.satellite_active[i], draw_fn, lambda r: r, current_raster)
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.satellite_x,
+            state.satellite_y,
+            self.SHAPE_MASKS['satellite'],
+        )
 
-        return jax.lax.fori_loop(0, self.consts.MAX_SATELLITES, render_single_satellite, raster)
+        return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
     
-    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
+    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray: ## TODO: Make into multi-bullet
         """Draw all bullets."""
         
         active_bullets = jnp.concatenate([
             jnp.array([state.player_bullet_active]),
-            state.bullet_active, ## Helicopter bombs
+            state.bullet_active,
         ])
 
         bullet_positions = jnp.vstack([
@@ -1440,7 +1391,7 @@ class JamesBondRenderer(JAXGameRenderer):
             jnp.stack(
                 [state.bullet_x.astype(jnp.int32), state.bullet_y.astype(jnp.int32)],
                 axis=1,
-            ), ## Helicopter bombs
+            ),
         ])
 
         def render_single_bullet(i, current_raster):
