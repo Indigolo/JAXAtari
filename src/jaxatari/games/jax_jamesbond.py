@@ -315,8 +315,8 @@ class JaxJamesBond(
         state_key, _ = jax.random.split(key)
 
         state = JamesBondState(
-            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.float32), ## TODO: Change all float32 pos-s to int32
-            player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.float32),
+            player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.int32), ## TODO: Change all float32 pos-s to int32
+            player_y=jnp.array(self.consts.PLAYER_INIT_Y, dtype=jnp.int32),
             player_vx=jnp.array(0, dtype=jnp.int32),
             player_vy=jnp.array(0, dtype=jnp.int32),
             player_jumping=jnp.array(False, dtype=jnp.bool_),
@@ -333,9 +333,9 @@ class JaxJamesBond(
             step_count=jnp.array(0, dtype=jnp.int32),
             level_progress=jnp.array(0, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
-            diamond_x=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32), ## TODO: Change max diamonds to 1? Also others...
-            diamond_y=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.float32),
-            diamond_active=jnp.zeros((self.consts.MAX_DIAMONDS,), dtype=jnp.bool_),
+            diamond_x=jnp.array(0, dtype=jnp.int32),
+            diamond_y=jnp.array(0, dtype=jnp.int32),
+            diamond_active=jnp.array(0, dtype=jnp.bool_),
             pit_x=jnp.array(0, dtype=jnp.int32),
             pit_y=jnp.array(0, dtype=jnp.int32),
             pit_active=jnp.array(False, dtype=jnp.bool_),
@@ -345,14 +345,14 @@ class JaxJamesBond(
             enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
             enemy_active=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.bool_),
             ## TODO: Here using helicopter and satellite instead of enemy
-            helicopter_x=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
-            helicopter_y=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.float32),
-            helicopter_active=jnp.zeros((self.consts.MAX_HELICOPTERS,), dtype=jnp.bool_),
-            satellite_x=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
-            satellite_y=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.float32),
-            satellite_active=jnp.zeros((self.consts.MAX_SATELLITES,), dtype=jnp.bool_),
-            bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
-            bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.float32),
+            helicopter_x=jnp.array(0, dtype=jnp.int32),
+            helicopter_y=jnp.array(0, dtype=jnp.int32),
+            helicopter_active=jnp.array(0, dtype=jnp.bool_),
+            satellite_x=jnp.array(0, dtype=jnp.int32),
+            satellite_y=jnp.array(0, dtype=jnp.int32),
+            satellite_active=jnp.array(0, dtype=jnp.bool_),
+            bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
+            bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
