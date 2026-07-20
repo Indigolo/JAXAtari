@@ -1402,8 +1402,7 @@ class JamesBondRenderer(JAXGameRenderer):
         bullet_positions = jnp.vstack([
             jnp.stack([state.player_bullet_x, state.player_bullet_y]),
             jnp.stack(
-                [state.bullet_x.astype(jnp.int32), state.bullet_y.astype(jnp.int32)],
-                axis=1,
+                [state.bullet_x, state.bullet_y],
             ),
         ])
 
