@@ -35,7 +35,7 @@ def get_default_asset_config() -> tuple:
             {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
             {
                 'name': 'car', 'type': 'group', 
-                'files': ['car.npy', 'car_dead_1', 'car_dead_2'] ## TODO: maybe delete car_dead_3 sprite
+                'files': ['car.npy', 'car_dead_1.npy', 'car_dead_2.npy'] ## TODO: maybe delete car_dead_3 sprite
             },
             {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
             {
