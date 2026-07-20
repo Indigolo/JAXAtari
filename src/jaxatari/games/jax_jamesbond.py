@@ -33,7 +33,10 @@ def get_default_asset_config() -> tuple:
         asset_config = [
             {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Placeholder, extract the real background sprite
             {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
-            {'name': 'car', 'type': 'single', 'file': 'car.npy'},
+            {
+                'name': 'car', 'type': 'group', 
+                'files': ['car.npy', 'car_dead_1', 'car_dead_2'] ## TODO: maybe delete car_dead_3 sprite
+            },
             {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
             {
                 'name': 'helicopter', 'type': 'group',
@@ -981,7 +984,7 @@ class JaxJamesBond(
             pit_active=next_pit_active
         )
 
-    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
+    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState: ## TODO: Way too complex, can easily optimize
         """Move falling helicopter bombs and periodically drop new ones.
 
         Bombs live in the generic bullet_* arrays. They fall straight down
@@ -1074,13 +1077,13 @@ class JaxJamesBond(
             self.consts.BULLET_HEIGHT,
         )
         hits = jnp.logical_and(state.bullet_active, overlaps)
-        hit_any = jnp.any(bomb_hits)
+        hit_any = jnp.any(hits)
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hit_any, can_take_damage)
 
         return state.replace(
             bullet_active=jnp.logical_and(
-                state.bullet_active, jnp.logical_not(bomb_hits)
+                state.bullet_active, jnp.logical_not(hits)
             ),
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
@@ -1305,11 +1308,21 @@ class JamesBondRenderer(JAXGameRenderer):
     def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement death animation
         """Draw the player car."""
 
+        sprite_idx = jnp.where(
+            state.hit_cooldown > 0,
+            jnp.where(
+                state.step_count % 2 == 0,
+                1,
+                2
+            ),
+            0
+        )
+
         return self.jr.render_at_clipped(
             raster, 
             state.player_x, 
             state.player_y, 
-            self.SHAPE_MASKS['car']
+            self.SHAPE_MASKS['car'][sprite_idx]
         )
     
     def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
@@ -1366,7 +1379,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
 
-    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation
+    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation? No need, doesn't do anything and is random?
         """Draw every active satellite (satellite state is a fixed-size array)."""
 
         draw_fn = lambda r: self.jr.render_at_clipped(
