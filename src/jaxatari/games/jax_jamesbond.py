@@ -111,7 +111,7 @@ class JamesBondConstants(struct.PyTreeNode):
         0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 
         0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 
         0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
-        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1 ## Water matrix: 111010101110011010101010010010100100010000100000001000000000-1; Nearly the same as air. Also, can jump higher and faster from water to air
     ])
 
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
