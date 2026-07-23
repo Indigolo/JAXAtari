@@ -578,8 +578,10 @@ class JaxJamesBond(
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
     def step_player_stage_one( ## TODO: Switch to air logic?
-        self, state: JamesBondState, atari_action: chex.Array
+        self, args
     ) -> JamesBondState:
+        state, atari_action = args
+        
         player_x = state.player_x
         player_y = state.player_y
         player_jumping = state.player_jumping
@@ -829,8 +831,9 @@ class JaxJamesBond(
         )
 
     def air_movement_logic(
-        self, state: JamesBondState, up_pressed: chex.Array, down_pressed: chex.Array
+        self, args
     ) -> JamesBondState:
+        state, up_pressed, down_pressed = args
 
         player_y = state.player_y
 
@@ -935,8 +938,9 @@ class JaxJamesBond(
         )
 
     def water_movement_logic(
-        self, state: JamesBondState, up_pressed: chex.Array, down_pressed: chex.Array
+        self, args
     ) -> JamesBondState:
+        state, up_pressed, down_pressed = args
 
         player_y = state.player_y
 
@@ -1041,8 +1045,10 @@ class JaxJamesBond(
         )
 
     def step_player_stage_two(
-        self, state: JamesBondState, atari_action: chex.Array
+        self, args
     ) -> JamesBondState:
+        state, atari_action = args
+
         player_x = state.player_x
         player_y = state.player_y
 
@@ -1152,7 +1158,7 @@ class JaxJamesBond(
             [
                 self.air_movement_logic,
                 self.water_movement_logic,
-                lambda r: r,
+                lambda args: args[0],
             ],
             (state, up_pressed, down_pressed)
         )
@@ -1234,8 +1240,10 @@ class JaxJamesBond(
         )
 
     def step_player_stage_three_placeholder(
-        self, state: JamesBondState, atari_action: chex.Array
+        self, args
     ):
+        state, atari_action = args
+        
         return state
 
     def _step_player(
