@@ -105,7 +105,7 @@ class JamesBondConstants(struct.PyTreeNode):
     PLAYER_HEIGHT: int = struct.field(pytree_node=False, default=4)
     PLAYER_INIT_X: int = struct.field(pytree_node=False, default=29) ## 30 if starting with 1
     PLAYER_INIT_Y: int = struct.field(pytree_node=False, default=119) ## 120 if starting with 1 (Not 122?)
-    PLAYER_IN_AIR_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
+    PLAYER_IN_Y_STEPS = jnp.array([ ## For the gravity feel of jumps. Each jump is 71 frames, 72nd frame is the start of the fall
         0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, ## TODO: Remove first zero?
         0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0,
         0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 
@@ -205,6 +205,10 @@ class JamesBondState:
     player_falling: chex.Array
     player_fast_falling: chex.Array
     player_in_air_step: chex.Array
+    player_diving: chex.Array
+    player_floating: chex.Array
+    player_fast_floating: chex.Array
+    player_in_water_step: chex.Array
     player_bullet_active: chex.Array ## TODO: Maybe think about every bullet as bullet with different and direction (and speed?)?
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
@@ -323,6 +327,10 @@ class JaxJamesBond(
             player_falling=jnp.array(False, dtype=jnp.bool_),
             player_fast_falling=jnp.array(False, dtype=jnp.bool_),
             player_in_air_step=jnp.array(0, dtype=jnp.int32),
+            player_diving=jnp.array(False, dtype=jnp.bool_),
+            player_floating=jnp.array(False, dtype=jnp.bool_),
+            player_fast_floating=jnp.array(False, dtype=jnp.bool_),
+            player_in_water_step=jnp.array(0, dtype=jnp.int32),
             player_bullet_active=jnp.array(False, dtype=jnp.bool_),
             player_bullet_step=jnp.array(-1, dtype=jnp.int32),
             player_bullet_x=jnp.array(-1, dtype=jnp.int32),
@@ -569,7 +577,7 @@ class JaxJamesBond(
 
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
-    def step_player_stage_one(
+    def step_player_stage_one( ## TODO: Switch to air logic?
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
         player_x = state.player_x
@@ -666,7 +674,7 @@ class JaxJamesBond(
         )
 
         up_pressed = jnp.where(player_jumping, False, up_pressed)
-        down_pressed = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, down_pressed) ## TODO: Maybe change for 2nd stage?
+        down_pressed = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, down_pressed)
         
         player_jumping = jnp.where(
             player_jumping,
@@ -720,13 +728,13 @@ class JaxJamesBond(
         
         player_y = jnp.where(
             player_fast_falling,
-            jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+            jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), ## TODO: Copy player_int_y_steps for performance?
             jnp.where(
                 player_jumping, 
-                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], 
+                player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_air_step], 
                 jnp.where(
                     player_falling, 
-                    jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+                    jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
                     player_y
                 )
             )
@@ -806,27 +814,237 @@ class JaxJamesBond(
         )
 
         return state.replace( ## TODO: Use state.replace or output just the values?
-            player_x = player_x.astype(jnp.float32),
-            player_y = player_y.astype(jnp.float32),
-            player_jumping = player_jumping.astype(jnp.bool_),
-            player_falling = player_falling.astype(jnp.bool_),
-            player_fast_falling = player_fast_falling.astype(jnp.bool_),
-            player_in_air_step = player_in_air_step.astype(jnp.int32),
-            player_bullet_active = player_bullet_active.astype(jnp.bool_),
-            player_bullet_step = player_bullet_step.astype(jnp.int32),
-            player_bullet_x = player_bullet_x.astype(jnp.int32),
-            player_bullet_y = player_bullet_y.astype(jnp.int32),
+            player_x = player_x,
+            player_y = player_y,
+
+            player_jumping = player_jumping,
+            player_falling = player_falling,
+            player_fast_falling = player_fast_falling,
+            player_in_air_step = player_in_air_step,
+
+            player_bullet_active = player_bullet_active,
+            player_bullet_step = player_bullet_step,
+            player_bullet_x = player_bullet_x,
+            player_bullet_y = player_bullet_y,
         )
-    
+
+    def air_movement_logic(
+        self, state: JamesBondState, up_pressed: chex.Array, down_pressed: chex.Array
+    ) -> JamesBondState:
+
+        player_y = state.player_y
+
+        player_jumping = state.player_jumping
+        player_falling = state.player_falling
+        player_fast_falling = state.player_fast_falling
+        player_in_air_step = state.player_in_air_step
+
+        up_pressed = jnp.where(player_jumping, False, up_pressed)
+        
+        player_jumping = jnp.where(
+            player_jumping,
+            player_jumping, 
+            jnp.where(
+                jnp.logical_and(
+                    jnp.logical_and(up_pressed, player_in_air_step < 71),
+                    player_y == self.consts.PLAYER_INIT_Y
+                ), 
+                True, 
+                False
+            )
+        )
+        
+        player_falling = jnp.where(
+            jnp.logical_and(
+                jnp.logical_or(player_falling, player_in_air_step >= 71), 
+                player_y != self.consts.PLAYER_INIT_Y
+            ), 
+            True, 
+            player_falling ## TODO: or False?
+        )
+        
+        player_fast_falling = jnp.where(
+            player_fast_falling,
+            True,
+            jnp.where(
+                jnp.logical_and(
+                    down_pressed,
+                    jnp.logical_or(player_jumping, player_falling)
+                ),
+                True,
+                False
+            )
+        )
+
+        player_falling = jnp.where(
+            player_fast_falling,
+            False,
+            player_falling,
+        )
+
+        player_jumping = jnp.where(
+            jnp.logical_or(player_falling, player_fast_falling),
+            False,
+            player_jumping
+        )
+        
+        player_in_air_step = jnp.where( ## Start immediately falling when reaching the peak of the jump
+            player_in_air_step >= 71, 
+            63, 
+            player_in_air_step
+        )
+        
+        player_y = jnp.where(
+            player_fast_falling,
+            jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+            jnp.where(
+                player_jumping, 
+                player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_air_step], 
+                jnp.where(
+                    player_falling, 
+                    jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+                    player_y
+                )
+            )
+        )
+
+        player_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_falling)
+        player_fast_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_fast_falling)
+
+        player_in_air_step = jnp.where(
+            player_jumping, 
+            player_in_air_step + 1, 
+            jnp.where(
+                player_y == self.consts.PLAYER_INIT_Y,
+                0,
+                jnp.where(
+                    jnp.logical_or(player_falling, player_fast_falling), 
+                    player_in_air_step - 1, 
+                    0,
+                )
+            )
+        )
+
+        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+            player_y = player_y,
+
+            player_jumping = player_jumping,
+            player_falling = player_falling,
+            player_fast_falling = player_fast_falling,
+            player_in_air_step = player_in_air_step,
+        )
+
+    def water_movement_logic(
+        self, state: JamesBondState, up_pressed: chex.Array, down_pressed: chex.Array
+    ) -> JamesBondState:
+
+        player_y = state.player_y
+
+        player_diving = state.player_diving
+        player_floating = state.player_floating
+        player_fast_floating = state.player_fast_floating
+        player_in_water_step = state.player_in_water_step
+        
+        down_pressed = jnp.where(player_diving, False, down_pressed)
+        
+        player_diving = jnp.where(
+            player_diving,
+            player_diving, 
+            jnp.where(
+                jnp.logical_and(
+                    jnp.logical_and(up_pressed, player_in_water_step < 71),
+                    player_y == self.consts.PLAYER_INIT_Y
+                ), 
+                True, 
+                False
+            )
+        )
+        
+        player_floating = jnp.where(
+            jnp.logical_and(
+                jnp.logical_or(player_floating, player_in_water_step >= 71), 
+                player_y != self.consts.PLAYER_INIT_Y
+            ), 
+            True, 
+            player_floating ## TODO: or False?
+        )
+        
+        player_fast_floating = jnp.where(
+            player_fast_floating,
+            True,
+            jnp.where(
+                jnp.logical_and(
+                    down_pressed,
+                    jnp.logical_or(player_diving, player_floating)
+                ),
+                True,
+                False
+            )
+        )
+
+        player_floating = jnp.where(
+            player_fast_floating,
+            False,
+            player_floating,
+        )
+
+        player_diving = jnp.where(
+            jnp.logical_or(player_floating, player_fast_floating),
+            False,
+            player_diving
+        )
+        
+        player_in_water_step = jnp.where( ## Start immediately floating up when reaching the bottom of the dive
+            player_in_water_step >= 71, 
+            63, 
+            player_in_water_step
+        )
+
+        player_y = jnp.where(
+            player_fast_floating,
+            jnp.clip(player_y - (self.consts.PLAYER_IN_Y_STEPS[player_in_water_step] + 1), self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
+            jnp.where(
+                player_diving, 
+                player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], 
+                jnp.where(
+                    player_floating, 
+                    jnp.clip(player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
+                    player_y
+                )
+            )
+        )
+
+        player_floating = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_floating)
+        player_fast_floating = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_fast_floating)
+
+        player_in_water_step = jnp.where(
+            player_diving, 
+            player_in_water_step + 1, 
+            jnp.where(
+                player_y == self.consts.PLAYER_INIT_Y,
+                0,
+                jnp.where(
+                    jnp.logical_or(player_floating, player_fast_floating), 
+                    player_in_water_step - 1, 
+                    0,
+                )
+            )
+        )
+
+        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+            player_y = player_y,
+
+            player_diving = player_diving,
+            player_floating = player_floating,
+            player_fast_floating = player_fast_floating,
+            player_in_water_step = player_in_water_step,
+        )
+
     def step_player_stage_two(
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
         player_x = state.player_x
         player_y = state.player_y
-        player_jumping = state.player_jumping
-        player_falling = state.player_falling
-        player_fast_falling = state.player_fast_falling
-        player_in_air_step = state.player_in_air_step
 
         player_bullet_active = state.player_bullet_active
         player_bullet_step = state.player_bullet_step
@@ -891,7 +1109,6 @@ class JaxJamesBond(
             ])
         )
 
-
         ###
         ### Player Movement Controller
         ###
@@ -914,92 +1131,34 @@ class JaxJamesBond(
             )
         )
 
-        up_pressed = jnp.where(player_jumping, False, up_pressed)
-        down_pressed = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, down_pressed) ## TODO: Maybe change for 2nd stage?
-        
-        player_jumping = jnp.where(
-            player_jumping,
-            player_jumping, 
+        y_function = jnp.where(
+            jnp.logical_or(
+                state.player_in_air_step > 0,
+                jnp.logical_and(up_pressed, player_y == self.consts.PLAYER_INIT_Y),
+            ),
+            0, ## Air
             jnp.where(
-                jnp.logical_and(up_pressed, player_in_air_step < 71), 
-                True, 
-                False
-            )
-        )
-        
-        player_falling = jnp.where(
-            jnp.logical_and(
-                jnp.logical_or(player_falling, player_in_air_step >= 71), 
-                player_y != self.consts.PLAYER_INIT_Y
-            ), 
-            True, 
-            player_falling
-        )
-        
-        player_fast_falling = jnp.where(
-            player_fast_falling,
-            player_fast_falling,
-            jnp.where(
-                jnp.logical_and(
-                    down_pressed,
-                    jnp.logical_or(player_jumping, player_falling)
+                jnp.logical_or(
+                    state.player_in_water_step > 0,
+                    jnp.logical_and(down_pressed, player_y == self.consts.PLAYER_INIT_Y),
                 ),
-                True,
-                False
+                1, ## Water
+                2  ## No change
             )
         )
 
-        player_falling = jnp.where(
-            player_fast_falling,
-            False,
-            player_falling,
-        )
-
-        player_jumping = jnp.where(
-            jnp.logical_or(player_falling, player_fast_falling),
-            False,
-            player_jumping
-        )
-        
-        player_in_air_step = jnp.where( ## Start immediately falling when reaching the peak of the jump
-            player_in_air_step >= 71, 
-            63, 
-            player_in_air_step
-        )
-        
-        player_y = jnp.where(
-            player_fast_falling,
-            jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
-            jnp.where(
-                player_jumping, 
-                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], 
-                jnp.where(
-                    player_falling, 
-                    jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
-                    player_y
-                )
-            )
-        )
-
-        player_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_falling)
-        player_fast_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_fast_falling)
-
-        player_in_air_step = jnp.where(
-            player_jumping, 
-            player_in_air_step + 1, 
-            jnp.where(
-                player_y == self.consts.PLAYER_INIT_Y,
-                0,
-                jnp.where(
-                    jnp.logical_or(player_falling, player_fast_falling), 
-                    player_in_air_step - 1, 
-                    0,
-                )
-            )
+        y_state = jax.lax.switch(
+            y_function,
+            [
+                self.air_movement_logic,
+                self.water_movement_logic,
+                lambda r: r,
+            ],
+            (state, up_pressed, down_pressed)
         )
 
         ###
-        ### Player Bullet controller
+        ### Player Bullet controller ## TODO: Change for stage 2
         ###
 
         fire_pressed = jnp.where(
@@ -1054,29 +1213,36 @@ class JaxJamesBond(
             player_bullet_active
         )
 
-        return state.replace( ## TODO: Use state.replace or output just the values?
-            player_x = player_x.astype(jnp.float32),
-            player_y = player_y.astype(jnp.float32),
-            player_jumping = player_jumping.astype(jnp.bool_),
-            player_falling = player_falling.astype(jnp.bool_),
-            player_fast_falling = player_fast_falling.astype(jnp.bool_),
-            player_in_air_step = player_in_air_step.astype(jnp.int32),
-            player_bullet_active = player_bullet_active.astype(jnp.bool_),
-            player_bullet_step = player_bullet_step.astype(jnp.int32),
-            player_bullet_x = player_bullet_x.astype(jnp.int32),
-            player_bullet_y = player_bullet_y.astype(jnp.int32),
+        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+            player_x = player_x,
+            player_y = y_state.player_y,
+
+            player_jumping = y_state.player_jumping,
+            player_falling = y_state.player_falling,
+            player_fast_falling = y_state.player_fast_falling,
+            player_in_air_step = y_state.player_in_air_step,
+
+            player_diving = y_state.player_diving,
+            player_floating = y_state.player_floating,
+            player_fast_floating = y_state.player_fast_floating,
+            player_in_water_step = y_state.player_in_water_step,
+
+            player_bullet_active = player_bullet_active,
+            player_bullet_step = player_bullet_step,
+            player_bullet_x = player_bullet_x,
+            player_bullet_y = player_bullet_y,
         )
-    
+
     def step_player_stage_three_placeholder(
         self, state: JamesBondState, atari_action: chex.Array
     ):
         return state
-        
+
     def _step_player(
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
 
-        return jax.lax.switch( ## First stage's index is 0
+        return jax.lax.switch( ## Stage indexing starts with 0
             state.stage,
             [
                 self.step_player_stage_one,
