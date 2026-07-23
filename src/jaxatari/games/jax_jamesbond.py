@@ -213,7 +213,7 @@ class JamesBondState:
     lives: chex.Array
     score: chex.Array
     step_count: chex.Array
-    level_progress: chex.Array
+    stage: chex.Array
     hit_cooldown: chex.Array ## TODO: What for?
     diamond_x: chex.Array
     diamond_y: chex.Array
@@ -254,7 +254,7 @@ class JamesBondObservation:
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
-    level_progress: jnp.ndarray
+    stage: jnp.ndarray
 
 
 @struct.dataclass
@@ -266,7 +266,7 @@ class JamesBondInfo:
     fired_bullet: jnp.ndarray
     score: jnp.ndarray
     lives: jnp.ndarray
-    level_progress: jnp.ndarray
+    stage: jnp.ndarray
     step_count: jnp.ndarray
 
 
@@ -331,7 +331,7 @@ class JaxJamesBond(
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
-            level_progress=jnp.array(0, dtype=jnp.int32),
+            stage=jnp.array(0, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.array(0, dtype=jnp.int32),
             diamond_y=jnp.array(0, dtype=jnp.int32),
@@ -437,7 +437,7 @@ class JaxJamesBond(
                     shape=(),
                     dtype=jnp.int32,
                 ),
-                "level_progress": spaces.Box(
+                "stage": spaces.Box(
                     low=0,
                     high=self.consts.MAX_EPISODE_STEPS,
                     shape=(),
@@ -520,7 +520,7 @@ class JaxJamesBond(
             bullets=bullets,
             lives=state.lives,
             score=state.score,
-            level_progress=state.level_progress,
+            stage=state.stage,
         )
 
     def _object_group_observation(
@@ -560,7 +560,7 @@ class JaxJamesBond(
             fired_bullet=state.fired_bullet,
             score=state.score,
             lives=state.lives,
-            level_progress=state.level_progress,
+            stage=state.stage,
             step_count=state.step_count,
         )
 
@@ -569,7 +569,7 @@ class JaxJamesBond(
 
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
-    def _step_player(
+    def step_player_stage_one(
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
         player_x = state.player_x
@@ -749,6 +749,254 @@ class JaxJamesBond(
             )
         )
 
+        ###
+        ### Player Bullet controller
+        ###
+
+        fire_pressed = jnp.where(
+            jnp.logical_or(player_bullet_active, player_bullet_step >= 30),
+            False,
+            fire_pressed
+        )
+
+        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active
+            player_bullet_step < 30, 
+            jnp.where(
+                player_bullet_active,
+                player_bullet_active,
+                jnp.where(
+                    fire_pressed,
+                    True,
+                    False
+                )
+            ),
+            False
+        )
+
+        player_bullet_x = jnp.where(
+            jnp.logical_and(player_bullet_active, player_bullet_x == -1), 
+            player_x + self.consts.PLAYER_WIDTH + 2, ## TODO: +2 or +3?
+            jnp.where(
+                player_bullet_active,
+                player_bullet_x + 2,
+                -1
+            )
+        )
+
+        player_bullet_y = jnp.where(
+            jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
+            player_y - 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
+            jnp.where(
+                player_bullet_active,
+                player_bullet_y - 2,
+                -1
+            )
+        )
+
+        player_bullet_step = jnp.where(
+            player_bullet_active,
+            player_bullet_step + 1,
+            -1
+        )
+
+        player_bullet_active = jnp.where(
+            player_bullet_step >= 30,
+            False,
+            player_bullet_active
+        )
+
+        return state.replace( ## TODO: Use state.replace or output just the values?
+            player_x = player_x.astype(jnp.float32),
+            player_y = player_y.astype(jnp.float32),
+            player_jumping = player_jumping.astype(jnp.bool_),
+            player_falling = player_falling.astype(jnp.bool_),
+            player_fast_falling = player_fast_falling.astype(jnp.bool_),
+            player_in_air_step = player_in_air_step.astype(jnp.int32),
+            player_bullet_active = player_bullet_active.astype(jnp.bool_),
+            player_bullet_step = player_bullet_step.astype(jnp.int32),
+            player_bullet_x = player_bullet_x.astype(jnp.int32),
+            player_bullet_y = player_bullet_y.astype(jnp.int32),
+        )
+    
+    def step_player_stage_two(
+        self, state: JamesBondState, atari_action: chex.Array
+    ) -> JamesBondState:
+        player_x = state.player_x
+        player_y = state.player_y
+        player_jumping = state.player_jumping
+        player_falling = state.player_falling
+        player_fast_falling = state.player_fast_falling
+        player_in_air_step = state.player_in_air_step
+
+        player_bullet_active = state.player_bullet_active
+        player_bullet_step = state.player_bullet_step
+        player_bullet_x = state.player_bullet_x
+        player_bullet_y = state.player_bullet_y
+
+        up_pressed = jnp.any(
+            jnp.array([
+                atari_action == Action.UP,
+                atari_action == Action.UPRIGHT,
+                atari_action == Action.UPLEFT,
+                atari_action == Action.UPFIRE,
+                atari_action == Action.UPRIGHTFIRE,
+                atari_action == Action.UPLEFTFIRE,
+            ])
+        )
+
+        right_pressed = jnp.any(
+            jnp.array([
+                atari_action == Action.RIGHT,
+                atari_action == Action.UPRIGHT,
+                atari_action == Action.DOWNRIGHT,
+                atari_action == Action.RIGHTFIRE,
+                atari_action == Action.UPRIGHTFIRE,
+                atari_action == Action.DOWNRIGHTFIRE
+            ])
+        )
+
+        left_pressed = jnp.any(
+            jnp.array([
+                atari_action == Action.LEFT,
+                atari_action == Action.UPLEFT,
+                atari_action == Action.DOWNLEFT,
+                atari_action == Action.LEFTFIRE,
+                atari_action == Action.UPLEFTFIRE,
+                atari_action == Action.DOWNLEFTFIRE
+            ])
+        )
+
+        down_pressed = jnp.any(
+            jnp.array([
+                atari_action == Action.DOWN,
+                atari_action == Action.DOWNLEFT,
+                atari_action == Action.DOWNRIGHT,
+                atari_action == Action.DOWNFIRE,
+                atari_action == Action.DOWNLEFTFIRE,
+                atari_action == Action.DOWNRIGHTFIRE,
+            ])
+        )
+
+        fire_pressed = jnp.any(
+            jnp.array([
+                atari_action == Action.FIRE,
+                atari_action == Action.RIGHTFIRE,
+                atari_action == Action.LEFTFIRE,
+                atari_action == Action.UPFIRE,
+                atari_action == Action.DOWNFIRE,
+                atari_action == Action.UPLEFTFIRE,
+                atari_action == Action.UPRIGHTFIRE,
+                atari_action == Action.DOWNLEFTFIRE,
+                atari_action == Action.DOWNRIGHTFIRE,
+            ])
+        )
+
+
+        ###
+        ### Player Movement Controller
+        ###
+
+        player_x = jnp.where(
+            right_pressed, 
+            jnp.where(
+                state.step_count % 2 == 0,
+                jnp.clip(player_x + 1, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X), 
+                player_x
+            ),
+            jnp.where(
+                left_pressed, 
+                jnp.where(
+                    state.step_count % 4 == 0, 
+                    jnp.clip(player_x - 1, self.consts.GAME_AREA_MIN_X, self.consts.GAME_AREA_MAX_X), 
+                    player_x
+                ), 
+                player_x
+            )
+        )
+
+        up_pressed = jnp.where(player_jumping, False, up_pressed)
+        down_pressed = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, down_pressed) ## TODO: Maybe change for 2nd stage?
+        
+        player_jumping = jnp.where(
+            player_jumping,
+            player_jumping, 
+            jnp.where(
+                jnp.logical_and(up_pressed, player_in_air_step < 71), 
+                True, 
+                False
+            )
+        )
+        
+        player_falling = jnp.where(
+            jnp.logical_and(
+                jnp.logical_or(player_falling, player_in_air_step >= 71), 
+                player_y != self.consts.PLAYER_INIT_Y
+            ), 
+            True, 
+            player_falling
+        )
+        
+        player_fast_falling = jnp.where(
+            player_fast_falling,
+            player_fast_falling,
+            jnp.where(
+                jnp.logical_and(
+                    down_pressed,
+                    jnp.logical_or(player_jumping, player_falling)
+                ),
+                True,
+                False
+            )
+        )
+
+        player_falling = jnp.where(
+            player_fast_falling,
+            False,
+            player_falling,
+        )
+
+        player_jumping = jnp.where(
+            jnp.logical_or(player_falling, player_fast_falling),
+            False,
+            player_jumping
+        )
+        
+        player_in_air_step = jnp.where( ## Start immediately falling when reaching the peak of the jump
+            player_in_air_step >= 71, 
+            63, 
+            player_in_air_step
+        )
+        
+        player_y = jnp.where(
+            player_fast_falling,
+            jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+            jnp.where(
+                player_jumping, 
+                player_y - self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], 
+                jnp.where(
+                    player_falling, 
+                    jnp.clip(player_y + self.consts.PLAYER_IN_AIR_STEPS[player_in_air_step], self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), 
+                    player_y
+                )
+            )
+        )
+
+        player_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_falling)
+        player_fast_falling = jnp.where(player_y == self.consts.PLAYER_INIT_Y, False, player_fast_falling)
+
+        player_in_air_step = jnp.where(
+            player_jumping, 
+            player_in_air_step + 1, 
+            jnp.where(
+                player_y == self.consts.PLAYER_INIT_Y,
+                0,
+                jnp.where(
+                    jnp.logical_or(player_falling, player_fast_falling), 
+                    player_in_air_step - 1, 
+                    0,
+                )
+            )
+        )
 
         ###
         ### Player Bullet controller
@@ -817,6 +1065,25 @@ class JaxJamesBond(
             player_bullet_step = player_bullet_step.astype(jnp.int32),
             player_bullet_x = player_bullet_x.astype(jnp.int32),
             player_bullet_y = player_bullet_y.astype(jnp.int32),
+        )
+    
+    def step_player_stage_three_placeholder(
+        self, state: JamesBondState, atari_action: chex.Array
+    ):
+        return state
+        
+    def _step_player(
+        self, state: JamesBondState, atari_action: chex.Array
+    ) -> JamesBondState:
+
+        return jax.lax.switch( ## First stage's index is 0
+            state.stage,
+            [
+                self.step_player_stage_one,
+                self.step_player_stage_two,
+                self.step_player_stage_three_placeholder,
+            ],
+            (state, atari_action)
         )
 
     def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: Implement fire pit
