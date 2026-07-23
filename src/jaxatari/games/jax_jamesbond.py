@@ -885,6 +885,8 @@ class JaxJamesBond(
         # Check whose turn it is to spawn
         spawn_diamond = row_57_empty & state.spawn_diamond_next
         spawn_helicopter = row_57_empty & (~state.spawn_diamond_next)
+        can_spawn_satellite = ~next_satellite_active ## Only spawn when the previous satellite left the screen
+        can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
         # Flip the turn flag ONLY if a spawn is happening on this frame
         next_spawn_diamond_next = jnp.where(
             row_57_empty,
@@ -892,71 +894,52 @@ class JaxJamesBond(
             state.spawn_diamond_next ## Keep it the same while they are flying
         )
         # Diamonds
-        available_diamond_idx = jnp.argmin(next_diamond_active) ## Get the first inactive diamond index
-
         # Apply new active status, position coordinates for spawned diamonds
-        next_diamond_active = next_diamond_active.at[available_diamond_idx].set(
-            jnp.where(spawn_diamond,
-                      True, 
-                      next_diamond_active[available_diamond_idx])
+        next_diamond_active = next_diamond_active | spawn_diamond
+        next_diamond_x = jnp.where(
+            spawn_diamond,
+            self.consts.GAME_AREA_MAX_X,
+            next_diamond_x
         )
-        next_diamond_x = next_diamond_x.at[available_diamond_idx].set(
-            jnp.where(spawn_diamond,
-                      self.consts.GAME_AREA_MAX_X,
-                      next_diamond_x[available_diamond_idx])
-        )
-        next_diamond_y = next_diamond_y.at[available_diamond_idx].set(
-            jnp.where(spawn_diamond,
-                      57.0, ## TODO: Diamond spawn height, will change if the number is wrong
-                      next_diamond_y[available_diamond_idx])
+        next_diamond_y = jnp.where(
+            spawn_diamond,
+            57.0, ## TODO: Diamond spawn height, will change if the number is wrong
+            next_diamond_y
         )
 
         # Enemies
-        ## Helicopter enemy
-        available_helicopter_idx = jnp.argmin(next_helicopter_active) ## Get the first inactive helicopter index
-
+        ## Helicopter
         # Apply new active status, position coordinates for spawned helicopter enemies
-        next_helicopter_active = next_helicopter_active.at[available_helicopter_idx].set(
-            jnp.where(spawn_helicopter,
-                      True,
-                      next_helicopter_active[available_helicopter_idx])
+        next_helicopter_active = next_helicopter_active | spawn_helicopter
+        next_helicopter_x = jnp.where(
+            spawn_helicopter,
+            self.consts.GAME_AREA_MAX_X,
+            next_helicopter_x
         )
-        next_helicopter_x = next_helicopter_x.at[available_helicopter_idx].set(
-            jnp.where(spawn_helicopter,
-                      self.consts.GAME_AREA_MAX_X,
-                      next_helicopter_x[available_helicopter_idx])
+        next_helicopter_y = jnp.where(
+            spawn_helicopter,
+            57.0, ## TODO: Helicopter spawn height, will change if the number is wrong
+            next_helicopter_y
         )
-        next_helicopter_y = next_helicopter_y.at[available_helicopter_idx].set(
-            jnp.where(spawn_helicopter,
-                      57.0, ## TODO: Helicopter spawn at the same height as diamond, will change if the number is wrong
-                      next_helicopter_y[available_helicopter_idx])
-        )
-        ## Satellite enemy
-        available_satellite_idx = jnp.argmin(next_satellite_active) ## Get the first inactive satellite index
-        can_spawn_satellite = ~jnp.any(next_satellite_active) ## Only spawn if the chosen index is inactive
+        ## Satellite
         # Apply new active status, position coordinates for spawned satellite enemies
-        next_satellite_active = next_satellite_active.at[available_satellite_idx].set(
-            jnp.where(can_spawn_satellite,
-                      True,
-                      next_satellite_active[available_satellite_idx])
+        next_satellite_active = next_satellite_active | can_spawn_satellite
+        next_satellite_x = jnp.where(
+            can_spawn_satellite,
+            self.consts.GAME_AREA_MIN_X - self.consts.SATELLITE_ENEMY_WIDTH,
+            next_satellite_x
         )
-        next_satellite_x = next_satellite_x.at[available_satellite_idx].set(
-            jnp.where(can_spawn_satellite,
-                      self.consts.GAME_AREA_MIN_X - self.consts.SATELLITE_ENEMY_WIDTH, ## TODO: In game, 
-                      next_satellite_x[available_satellite_idx])
-        )
-        next_satellite_y = next_satellite_y.at[available_satellite_idx].set(
-            jnp.where(can_spawn_satellite,
-                      75.0, ## TODO: Satellite spawn height, will change if the number is wrong
-                      next_satellite_y[available_satellite_idx])
+        next_satellite_y = jnp.where(
+            can_spawn_satellite,
+            75.0, ## TODO: Satellite spawn height, will change if the number is wrong
+            next_satellite_y
         )
         ## Fire pit
         ## TODO: The spawn of fire pit is a little bit complicated, first one spawn at x=124, but from the next one it will spawn at GAME_AREA_MAX_X, and the next one always spawn even the previous one is still on screen(as far as i checked, after the yellow part of fire pit disappears on GAME_AREA_MIN_X)
         ## TODO: Now i apply the same logic as enemy and diamond, which is only spawn when the entire row is empty, will change it after we discuss about it
         ## The pit is a single scalar object (see reset and _render_pit), so
         ## spawn with plain jnp.where instead of array indexing.
-        can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
-        next_pit_active = jnp.logical_or(next_pit_active, can_spawn_pit)
+        next_pit_active = next_pit_active | can_spawn_pit
         next_pit_x = jnp.where(
             can_spawn_pit,
             self.consts.GAME_AREA_MAX_X,
@@ -964,7 +947,7 @@ class JaxJamesBond(
         )
         next_pit_y = jnp.where(
             can_spawn_pit,
-            122, ## TODO: Pit spawn height, will change if the number is wrong
+            122.0, ## TODO: Pit spawn height, will change if the number is wrong
             next_pit_y
         )
 
