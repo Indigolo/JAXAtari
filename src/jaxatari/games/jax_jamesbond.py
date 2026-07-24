@@ -130,6 +130,17 @@ class JamesBondConstants(struct.PyTreeNode):
     ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
+    HELICOPTER_MELEE_STEP = jnp.array([
+        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 0, 3, 6, 9
+        0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ## 12, 15, 18
+        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, ## 21, 24, 27
+        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 30, 33, 36, 39
+        0, 1, 0, 1, 0, 1, 0, 0, 1, 0, ## 41, 43, 45, 48
+        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, ## 51, 54, 57
+        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 60, 63, 66, 69
+        0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ## 72, 75, 78
+        0, 1, 0, 0, 1, 0, 0, 1, 0, 1  ## 81, 84, 87, 89
+    ])
     SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Satellite width is 8 pixels
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
@@ -233,6 +244,7 @@ class JamesBondState:
     helicopter_x: chex.Array
     helicopter_y: chex.Array
     helicopter_active: chex.Array
+    helicopter_melee_step: chex.Array
     satellite_x: chex.Array
     satellite_y: chex.Array
     satellite_active: chex.Array
@@ -356,6 +368,7 @@ class JaxJamesBond(
             helicopter_x=jnp.array(0, dtype=jnp.int32),
             helicopter_y=jnp.array(0, dtype=jnp.int32),
             helicopter_active=jnp.array(0, dtype=jnp.bool_),
+            helicopter_melee_step=jnp.array(0, dtype=jnp.int32),
             satellite_x=jnp.array(0, dtype=jnp.int32),
             satellite_y=jnp.array(0, dtype=jnp.int32),
             satellite_active=jnp.array(0, dtype=jnp.bool_),
@@ -1278,7 +1291,7 @@ class JaxJamesBond(
 
         # Enemies
         ## Helicopter enemy (Scroll left)
-        ## 1. Determine which speed zone the helicopter is currently in
+        ## 1. Determine which speed zone the helicopter is currently in, also affecting melee behavior of helicopter
         in_slow_mode = (state.helicopter_x <= 96) & (state.helicopter_x > 63)
         ## 2. The speed of helicopter is 0.6 pixels per frame in normal mode, and 0.375 pixels per frame in slow mode
         move_normal = (state.step_count % 5 == 0) | (state.step_count % 5 == 2) | (state.step_count % 5 == 4)
@@ -1296,6 +1309,22 @@ class JaxJamesBond(
         next_helicopter_y = state.helicopter_y
         helicopter_on_screen = next_helicopter_x >= (self.consts.GAME_AREA_MIN_X - self.consts.HELICOPTER_ENEMY_WIDTH)
         next_helicopter_active = state.helicopter_active & helicopter_on_screen
+        ## 3. The melee step of helicopter is only incremented when the helicopter is in slow mode
+        ## Update the step counter for the next frame, reset to 0 if the helicopter is not in slow mode or not active
+        next_helicopter_melee_step = jnp.where(
+            next_helicopter_active & in_slow_mode,
+            state.helicopter_melee_step + 1,
+            0
+        )
+        ## Safely look up the 0 or 1 for the current melee step from 0 to 89
+        safe_melee_step = jnp.clip(state.helicopter_melee_step, 0, 89)
+        advance_melee_step = self.consts.HELICOPTER_MELEE_STEPS[safe_melee_step]
+        ## Accumulate the sprite index from 0 to 15(in jb_sprites we have 16 helicopter_shot)
+        next_helicopter_sprite_idx = jnp.where(
+            in_slow_mode,
+            (state.helicopter_sprite_idx + advance_melee_step) % 16,
+            0
+        )
         
         ## Satellite enemy (Scroll right)
         ## Satellite enemy speed, here is 0.8 pixels per frame
@@ -1399,6 +1428,8 @@ class JaxJamesBond(
             helicopter_x=next_helicopter_x,
             helicopter_y=next_helicopter_y,
             helicopter_active=next_helicopter_active,
+            helicopter_melee_step=next_helicopter_melee_step,
+            helicopter_sprite_idx=next_helicopter_sprite_idx,
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
