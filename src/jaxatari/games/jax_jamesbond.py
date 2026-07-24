@@ -1692,7 +1692,10 @@ class JamesBondRenderer(JAXGameRenderer):
     def render(self, state: JamesBondState) -> jnp.ndarray:
         """Render a simple background, inactive object slots, and player box."""
 
-        raster = self.jr.create_object_raster(self.BACKGROUND) ## TODO: Render ground, maybe as part of background?
+        raster = self.jr.create_object_raster(self.BACKGROUND)
+
+        raster = self._render_stars(raster, state)
+        raster = self._render_ground(raster, state)
 
         raster = self._render_car(raster, state)
         raster = self._render_diamond(raster, state)
@@ -1710,6 +1713,27 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 4) ## TODO: Position offset per digit?
 
         return self.jr.render_from_palette(raster, self.PALETTE)
+
+    def _render_ground(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the static ground strip using the existing ground_unkempt sprite."""
+
+        return self.jr.render_at_clipped(
+            raster,
+            4,    # x - matches GAME_AREA_MIN_X
+            119,  # y - matches GAME_AREA_MAX_Y / PLAYER_INIT_Y
+            self.SHAPE_MASKS['ground'],
+        )
+
+    def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the twinkling star field, alternating between the two frames."""
+
+        sprite_idx = jnp.where(state.step_count % 2 == 0, 0, 1)
+        return self.jr.render_at_clipped(
+            raster,
+            0,  # x
+            0,  # y
+            self.SHAPE_MASKS['stars'][sprite_idx],
+        )
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray: ## TODO: Turn to ground renderer
         """Draw the placeholder play area."""
