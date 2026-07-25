@@ -1306,7 +1306,7 @@ class JaxJamesBond(
                 player_y - 1,
                 jnp.where(
                     player_wbullet_step <= 8,
-                    player_wbullet_x + self.const.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                    player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
                     jnp.where(
                         player_wbullet_step % 2 == 1,
                         player_wbullet_x + 1,
