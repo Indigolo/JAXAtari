@@ -112,7 +112,11 @@ class JamesBondConstants(struct.PyTreeNode):
         0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 
         0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
         0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1 ## Water matrix: 111010101110011010101010010010100100010000100000001000000000-1; Nearly the same as air. Also, can jump higher and faster from water to air
-    ])
+    ], dtype=jnp.int32)
+    PLAYER_WATER_BULLET_STEPS = jnp.array([
+        (2, -1), (2, -1), (2, -1), (2, -1),
+        (1, 1),  (1, 2),  (1, 1),  (1, 2)  ## And then (1, 0), (0, 2) until 60 frames
+    ], dtype=jnp.int32)
 
     MAX_LIVES: int = struct.field(pytree_node=False, default=3)
     MAX_DIAMONDS: int = struct.field(pytree_node=False, default=8)
@@ -224,6 +228,10 @@ class JamesBondState:
     player_bullet_step: chex.Array
     player_bullet_x: chex.Array
     player_bullet_y: chex.Array
+    player_wbullet_active: chex.Array ## Water bullet
+    player_wbullet_step: chex.Array
+    player_wbullet_x: chex.Array
+    player_wbullet_y: chex.Array
     bullet_vx: chex.Array
     lives: chex.Array
     score: chex.Array
@@ -347,6 +355,10 @@ class JaxJamesBond(
             player_bullet_step=jnp.array(-1, dtype=jnp.int32),
             player_bullet_x=jnp.array(-1, dtype=jnp.int32),
             player_bullet_y=jnp.array(-1, dtype=jnp.int32),
+            player_wbullet_active=jnp.array(False, dtype=jnp.bool_),
+            player_wbullet_step=jnp.array(-1, dtype=jnp.int32),
+            player_wbullet_x=jnp.array(-1, dtype=jnp.int32),
+            player_wbullet_y=jnp.array(-1, dtype=jnp.int32),
             bullet_vx=jnp.array(0, dtype=jnp.float32),
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
@@ -1056,7 +1068,7 @@ class JaxJamesBond(
             player_fast_floating = player_fast_floating,
             player_in_water_step = player_in_water_step,
         )
-
+    
     def step_player_stage_two(
         self, args
     ) -> JamesBondState:
@@ -1064,11 +1076,6 @@ class JaxJamesBond(
 
         player_x = state.player_x
         player_y = state.player_y
-
-        player_bullet_active = state.player_bullet_active
-        player_bullet_step = state.player_bullet_step
-        player_bullet_x = state.player_bullet_x
-        player_bullet_y = state.player_bullet_y
 
         up_pressed = jnp.any(
             jnp.array([
@@ -1177,62 +1184,206 @@ class JaxJamesBond(
         )
 
         ###
-        ### Player Bullet controller ## TODO: Change for stage 2
+        ### Player Bullet controller
         ###
 
-        fire_pressed = jnp.where(
-            jnp.logical_or(player_bullet_active, player_bullet_step >= 30),
-            False,
-            fire_pressed
-        )
+        def air_bullet_logic(
+            state
+        ) -> JamesBondState:
 
-        player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active
-            player_bullet_step < 30, 
-            jnp.where(
-                player_bullet_active,
-                player_bullet_active,
+            player_bullet_active = state.player_bullet_active
+            player_bullet_step = state.player_bullet_step
+            player_bullet_x = state.player_bullet_x
+            player_bullet_y = state.player_bullet_y
+            
+            fire_pressed = True
+            
+            fire_pressed = jnp.where(
+                jnp.logical_or(player_bullet_active, player_bullet_step >= 30),
+                False,
+                fire_pressed
+            )
+
+            player_bullet_active = jnp.where( ## 1st frame is creation, 31st is deactivation, 30th is the last active
+                player_bullet_step < 30, 
                 jnp.where(
-                    fire_pressed,
-                    True,
-                    False
+                    player_bullet_active,
+                    player_bullet_active,
+                    jnp.where(
+                        fire_pressed,
+                        True,
+                        False
+                    )
+                ),
+                False
+            )
+
+            player_bullet_x = jnp.where(
+                jnp.logical_and(player_bullet_active, player_bullet_x == -1), 
+                player_x + self.consts.PLAYER_WIDTH + 2, ## TODO: +2 or +3?
+                jnp.where(
+                    player_bullet_active,
+                    player_bullet_x + 2,
+                    -1
                 )
+            )
+
+            player_bullet_y = jnp.where(
+                jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
+                player_y - 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
+                jnp.where(
+                    player_bullet_active,
+                    player_bullet_y - 2,
+                    -1
+                )
+            )
+
+            player_bullet_step = jnp.where(
+                player_bullet_active,
+                player_bullet_step + 1,
+                -1
+            )
+
+            player_bullet_active = jnp.where(
+                player_bullet_step >= 30,
+                False,
+                player_bullet_active
+            )
+
+            return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+                player_bullet_active = player_bullet_active,
+                player_bullet_step = player_bullet_step,
+                player_bullet_x = player_bullet_x,
+                player_bullet_y = player_bullet_y,
+            )
+
+        def water_bullet_logic(
+            state
+        ) -> JamesBondState:
+    
+            player_wbullet_active = state.player_wbullet_active
+            player_wbullet_step = state.player_wbullet_step
+            player_wbullet_x = state.player_wbullet_x
+            player_wbullet_y = state.player_wbullet_y
+            
+            fire_pressed = True
+            
+            fire_pressed = jnp.where(
+                jnp.logical_or(player_wbullet_active, player_wbullet_step >= 60),
+                False,
+                fire_pressed
+            )
+
+            player_wbullet_active = jnp.where( ## 1st frame is creation, 61st is deactivation, 60th is the last active
+                player_wbullet_step < 60, 
+                jnp.where(
+                    player_wbullet_active,
+                    player_wbullet_active,
+                    jnp.where(
+                        fire_pressed,
+                        True,
+                        False
+                    )
+                ),
+                False
+            )
+
+            player_wbullet_x = jnp.where(
+                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
+                player_x,
+                jnp.where(player_wbullet_step <= 8,
+                    player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][0],
+                    jnp.where(
+                        player_wbullet_step % 2 == 1,
+                        player_wbullet_x + 1,
+                        0
+                    )
+                )
+            )
+
+            player_wbullet_y = jnp.where(
+                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
+                player_y - 1,
+                jnp.where(
+                    player_wbullet_step <= 8,
+                    player_wbullet_x + self.const.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                    jnp.where(
+                        player_wbullet_step % 2 == 1,
+                        player_wbullet_x + 1,
+                        0
+                    )
+                )
+            )
+
+            player_wbullet_step = jnp.where(
+                player_wbullet_active,
+                player_wbullet_step + 1,
+                -1
+            )
+
+            player_wbullet_active = jnp.where(
+                player_wbullet_step >= 60,
+                False,
+                player_wbullet_active
+            )
+
+            return state.replace(
+                player_wbullet_active = player_wbullet_active,
+                player_wbullet_step = player_wbullet_step,
+                player_wbullet_x = player_wbullet_x,
+                player_wbullet_y = player_wbullet_y,
+            )
+
+        """
+        bullet_function = jnp.where( ## Water bullet is always the first one shot
+            fire_pressed,
+            jnp.where(
+                ~state.player_wbullet_active,
+                1, ## Only run water_bullet_logic
+                2  ## Run both bullet logics
             ),
-            False
-        )
-
-        player_bullet_x = jnp.where(
-            jnp.logical_and(player_bullet_active, player_bullet_x == -1), 
-            player_x + self.consts.PLAYER_WIDTH + 2, ## TODO: +2 or +3?
             jnp.where(
-                player_bullet_active,
-                player_bullet_x + 2,
-                -1
+                state.player_wbullet_active,
+                jnp.where(
+                    state.player_bullet_active,
+                    2,
+                    1
+                ),
+                jnp.where(
+                    state.player_bullet_active,
+                    3, ## Only run air_bullet_logic
+                    0
+                )
             )
+            0 ## Don't run anything
         )
+        """
 
-        player_bullet_y = jnp.where(
-            jnp.logical_and(player_bullet_active, player_bullet_y == -1), 
-            player_y - 4, ## If top-left drawing; TODO: Sometimes spawns at +5?
+        bullet_function = (state.player_bullet_active.astype(jnp.int32) << 1) | state.player_wbullet_active.astype(jnp.int32)
+
+        bullet_function = jnp.where(
+            bullet_function == 0,
             jnp.where(
-                player_bullet_active,
-                player_bullet_y - 2,
-                -1
-            )
+                fire_pressed,
+                1, ## Water bullet is always the first one shot
+                0
+            ),
+            bullet_function
         )
 
-        player_bullet_step = jnp.where(
-            player_bullet_active,
-            player_bullet_step + 1,
-            -1
+        bullet_state = jax.lax.switch(
+            bullet_function,
+            [
+                lambda r: r,
+                water_bullet_logic,
+                air_bullet_logic,
+                lambda r: air_bullet_logic(water_bullet_logic(r))
+            ],
+            state
         )
 
-        player_bullet_active = jnp.where(
-            player_bullet_step >= 30,
-            False,
-            player_bullet_active
-        )
 
-        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+        return state.replace(
             player_x = player_x,
             player_y = y_state.player_y,
 
@@ -1246,10 +1397,15 @@ class JaxJamesBond(
             player_fast_floating = y_state.player_fast_floating,
             player_in_water_step = y_state.player_in_water_step,
 
-            player_bullet_active = player_bullet_active,
-            player_bullet_step = player_bullet_step,
-            player_bullet_x = player_bullet_x,
-            player_bullet_y = player_bullet_y,
+            player_wbullet_active = bullet_state.player_wbullet_active,
+            player_wbullet_step = bullet_state.player_wbullet_step,
+            player_wbullet_x = bullet_state.player_wbullet_x,
+            player_wbullet_y = bullet_state.player_wbullet_y,
+
+            player_bullet_active = bullet_state.player_bullet_active,
+            player_bullet_step = bullet_state.player_bullet_step,
+            player_bullet_x = bullet_state.player_bullet_x,
+            player_bullet_y = bullet_state.player_bullet_y,
         )
 
     def step_player_stage_three_placeholder(
