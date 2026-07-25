@@ -134,7 +134,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
-    HELICOPTER_MELEE_STEP = jnp.array([
+    HELICOPTER_MELEE_STEPS = jnp.array([
         1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 0, 3, 6, 9
         0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ## 12, 15, 18
         0, 1, 0, 0, 1, 0, 0, 1, 0, 0, ## 21, 24, 27
@@ -1291,7 +1291,7 @@ class JaxJamesBond(
             player_wbullet_x = jnp.where(
                 jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
                 player_x,
-                jnp.where(player_wbullet_step <= 8,
+                jnp.where(player_wbullet_step < 8,
                     player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][0],
                     jnp.where(
                         player_wbullet_step % 2 == 1,
@@ -1305,7 +1305,7 @@ class JaxJamesBond(
                 jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
                 player_y - 1,
                 jnp.where(
-                    player_wbullet_step <= 8,
+                    player_wbullet_step < 8,
                     player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
                     jnp.where(
                         player_wbullet_step % 2 == 1,
