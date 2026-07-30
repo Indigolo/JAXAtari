@@ -57,7 +57,7 @@ def get_default_asset_config() -> tuple:
             {
                 'name': 'stars', 'type': 'group',
                 'files': ['stars_1.npy', 'stars_2.npy']
-             },
+            },
 
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
 
@@ -134,17 +134,17 @@ class JamesBondConstants(struct.PyTreeNode):
     ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
-    HELICOPTER_MELEE_STEPS = jnp.array([
-        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 0, 3, 6, 9
-        0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ## 12, 15, 18
-        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, ## 21, 24, 27
-        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 30, 33, 36, 39
-        0, 1, 0, 1, 0, 1, 0, 0, 1, 0, ## 41, 43, 45, 48
-        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, ## 51, 54, 57
-        1, 0, 0, 1, 0, 0, 1, 0, 0, 1, ## 60, 63, 66, 69
-        0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ## 72, 75, 78
-        0, 1, 0, 0, 1, 0, 0, 1, 0, 1  ## 81, 84, 87, 89
-    ])
+    HELICOPTER_MELEE_SPRITE_STEPS = jnp.array([ ## 2nd elements are x positions of sprites. Follows the sequence: Sprite 1 -> Nothing -> Sprite 1 -> Nothing -> Sprite 2 -> ...
+        (-1,-1), (0,5), (-1,-1), (1,4), (-1,-1), (1,4), (-1,-1), (2,3), (-1,-1), (2,3), 
+        (-1,-1), (3,0), (-1,-1), (3,0), (-1,-1), (4,-8), (-1,-1), (4,-8), (-1,-1), (5,-15), 
+        (-1,-1), (5,-15), (-1,-1), (6,-22), (-1,-1), (6,-22), (-1,-1), (7,-30), (-1,-1), (7,-38),
+        (-1,-1), (8,-46), (-1,-1), (8,-46), (-1,-1), (9,-54), (-1,-1), (9,-54), (-1,-1), (10,9),
+        (-1,-1), (10,9), (-1,-1), (11,6), (-1,-1), (11,6), (-1,-1), (12,5), (-1,-1), (12,5),
+        (-1,-1), (13,4), (-1,-1), (13,4), (-1,-1), (14,3), (-1,-1), (14,3), (-1,-1), (1,4),
+        (-1,-1), (1,4), (-1,-1), (2,3), (-1,-1), (2,3), (-1,-1), (3,0), (-1,-1), (3,0),
+        (-1,-1), (4,-8), (-1,-1), (4,-8), (-1,-1), (5,-15), (-1,-1), (5,-15), (-1,-1), (6,-22), 
+        (-1,-1), (6,-22), (-1,-1), (7,-30), (-1,-1), (7,-30), (-1,-1), (8,-38), (-1,-1), (8,-38)
+    ], dtype=jnp.int32)
     SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Satellite width is 8 pixels
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
@@ -1940,8 +1940,7 @@ class JamesBondRenderer(JAXGameRenderer):
         )
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
-    def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement death animation
-        """Draw the player car."""
+    def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
         sprite_idx = jnp.where(
             state.hit_cooldown > 0,
@@ -1961,7 +1960,6 @@ class JamesBondRenderer(JAXGameRenderer):
         )
     
     def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw every active diamond (diamond state is a fixed-size array)."""
 
         sprite_idx = jnp.where(
             state.step_count % 2 == 0,
@@ -1996,8 +1994,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(state.pit_active, draw_fn, lambda r: r, raster)
     
-    def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement melee animation
-        """Draw every active helicopter (helicopter state is a fixed-size array)."""
+    def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
         sprite_idx = jnp.where(
             state.step_count % 2 == 0,
@@ -2009,13 +2006,48 @@ class JamesBondRenderer(JAXGameRenderer):
             r,
             state.helicopter_x,
             state.helicopter_y,
-            self.SHAPE_MASKS['helicopter'][sprite_idx],
+            self.SHAPE_MASKS['helicopter'][sprite_idx]
         )
 
         return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
 
-    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ## TODO: Implement spawning blinking animation? No need, doesn't do anything and is random?
-        """Draw every active satellite (satellite state is a fixed-size array)."""
+    def _render_helicopter_melee(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the helicopter melee animation."""
+
+        """
+        ## UNFINISHED
+        helicopter_melee_step = jnp.where( ## Only first 14 needed; ## 39 -> last visible left, 40 -> invisible, 41 -> second right
+                    state.helicopter_melee_step > 40,
+                    jnp.ceil(state.helicopter_melee_step / 2),
+                    state.helicopter_melee_step
+                )
+                
+                melee_idx = jnp.where( ## Create -> gone -> same -> gone -> new
+                    helicopter_melee_step % 2 == 0,
+                    0,
+                    jnp.where(
+                        state.step_count % 2 == 0,
+                        (helicopter_melee_step - 1) / 2,
+                        jnp.maximum(
+                            (helicopter_melee_step - 3) / 4,
+                            (helicopter_melee_step - 1) / 2,
+                        )
+                    )
+                )
+        """
+
+        melee_idx = self.consts.HELICOPTER_MELEE_SPRITE_STEPS[state.helicopter_melee_step][0]
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.helicopter_x + self.consts.HELICOPTER_MELEE_SPRITE_STEPS[state.helicopter_melee_step][1],
+            state.helicopter_y + 7,
+            self.SHAPE_MASKS['helicopter_melee'][melee_idx]
+        )
+
+        return jax.lax.cond(melee_idx != -1, draw_fn, lambda r: r, raster) ## TODO: Maybe add logical and with helicopter_active
+
+    def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
         draw_fn = lambda r: self.jr.render_at_clipped(
             r,
@@ -2026,7 +2058,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
     
-    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray: ## TODO: Make into multi-bullet
+    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray: ## TODO: Make draw every bullet
         """Draw all bullets."""
         
         active_bullets = jnp.concatenate([
