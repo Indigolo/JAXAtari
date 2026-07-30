@@ -412,7 +412,7 @@ class JaxJamesBond(
             fired_bullet=atari_action == Action.FIRE,
         )
         state = self._step_player(state, atari_action)
-        state = self._update_objects_placeholder(state)
+        state = self._update_objects(state)
         state = self._update_enemy_bombs(state)
         state = self._check_collisions_placeholder(state)
 
@@ -570,7 +570,7 @@ class JaxJamesBond(
         if orientation is None: ## TODO: Maybe remove if not needed
             orientation = jnp.zeros_like(x, dtype=jnp.float32)
 
-        ## Inactive objects keep drifting in _update_objects_placeholder, so
+        ## Inactive objects keep drifting in _update_objects, so
         ## their stale coordinates can leave the screen bounds. Zero them out
         ## and clamp active ones so the observation stays inside its space.
         safe_x = jnp.where(active, jnp.clip(x, 0, self.consts.SCREEN_WIDTH), 0.0)
@@ -1429,7 +1429,7 @@ class JaxJamesBond(
             (state, atari_action)
         )
 
-    def _update_objects_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: Implement fire pit
+    def _update_objects(self, state: JamesBondState) -> JamesBondState: ## TODO: Implement fire pit
         # Future object lifecycle logic belongs here.
 
         # === 1. Movement and off-screen cleanup ===
@@ -1444,6 +1444,13 @@ class JaxJamesBond(
         next_diamond_y = state.diamond_y
         diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
         next_diamond_active = state.diamond_active & diamond_on_screen
+
+        # Scuba (Scroll left)
+        ## Scuba speed, here is 0.25 pixels per frame, will implement later
+        # next_scuba_x
+        # next_scuba_y
+        # scuba_on_screen
+        # next_scuba_active
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -1470,15 +1477,6 @@ class JaxJamesBond(
         next_helicopter_melee_step = jnp.where(
             next_helicopter_active & in_slow_mode,
             state.helicopter_melee_step + 1,
-            0
-        )
-        ## Safely look up the 0 or 1 for the current melee step from 0 to 89
-        safe_melee_step = jnp.clip(state.helicopter_melee_step, 0, 89)
-        advance_melee_step = self.consts.HELICOPTER_MELEE_STEPS[safe_melee_step]
-        ## Accumulate the sprite index from 0 to 15(in jb_sprites we have 16 helicopter_shot)
-        next_helicopter_sprite_idx = jnp.where(
-            in_slow_mode,
-            (state.helicopter_sprite_idx + advance_melee_step) % 16,
             0
         )
         
@@ -1532,6 +1530,11 @@ class JaxJamesBond(
             57.0, ## TODO: Diamond spawn height, will change if the number is wrong
             next_diamond_y
         )
+        # Scubas
+        # Apply new active status, position coordinates for spawned scubas
+        # next_scuba_active
+        # next_scuba_x
+        # next_scuba_y
 
         # Enemies
         ## Helicopter
@@ -1581,11 +1584,13 @@ class JaxJamesBond(
             diamond_x=next_diamond_x,
             diamond_y=next_diamond_y,
             diamond_active=next_diamond_active,
+            # scuba_x=next_scuba_x,
+            # scuba_y=next_scuba_y,
+            # scuba_active=next_scuba_active,
             helicopter_x=next_helicopter_x,
             helicopter_y=next_helicopter_y,
             helicopter_active=next_helicopter_active,
             helicopter_melee_step=next_helicopter_melee_step,
-            helicopter_sprite_idx=next_helicopter_sprite_idx,
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
