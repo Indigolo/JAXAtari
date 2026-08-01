@@ -173,8 +173,12 @@ class JamesBondConstants(struct.PyTreeNode):
     ## Enemy fire: one helicopter bomb and one satellite laser, single objects
     ## like everything else. Numbers checked against the real ROM in ALE frame
     ## by frame, not guessed.
-    HELICOPTER_BOMB_VX: int = struct.field(pytree_node=False, default=-1) ## bomb slides 1px left per frame while falling
-    HELICOPTER_BOMB_VY: int = struct.field(pytree_node=False, default=2) ## and falls 2px per frame
+    ## The bomb picks its direction once when it drops: 1px per frame towards
+    ## the side the player is on, and keeps it for the whole fall. Found while
+    ## playing (bombs fall left AND right diagonal) and confirmed in ALE by
+    ## teleporting the player around via RAM.
+    HELICOPTER_BOMB_SPEED_X: int = struct.field(pytree_node=False, default=1)
+    HELICOPTER_BOMB_VY: int = struct.field(pytree_node=False, default=2) ## falls 2px per frame
     SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
 
@@ -262,6 +266,7 @@ class JamesBondState:
     ## Enemy fire, single objects (the 2600 also only had one missile per object)
     helicopter_bomb_x: chex.Array
     helicopter_bomb_y: chex.Array
+    helicopter_bomb_vx: chex.Array ## +-1, aimed at the player once on release
     helicopter_bomb_active: chex.Array
     satellite_laser_x: chex.Array
     satellite_laser_y: chex.Array
@@ -397,6 +402,7 @@ class JaxJamesBond(
             satellite_active=jnp.array(0, dtype=jnp.bool_),
             helicopter_bomb_x=jnp.array(-1, dtype=jnp.int32),
             helicopter_bomb_y=jnp.array(-1, dtype=jnp.int32),
+            helicopter_bomb_vx=jnp.array(0, dtype=jnp.int32),
             helicopter_bomb_active=jnp.array(False, dtype=jnp.bool_),
             satellite_laser_x=jnp.array(-1, dtype=jnp.int32),
             satellite_laser_y=jnp.array(-1, dtype=jnp.int32),
@@ -1632,7 +1638,7 @@ class JaxJamesBond(
         ## (checked in the real game: they just disappear there, no explosion)
         heli_bomb_x = jnp.where(
             state.helicopter_bomb_active,
-            state.helicopter_bomb_x + self.consts.HELICOPTER_BOMB_VX,
+            state.helicopter_bomb_x + state.helicopter_bomb_vx,
             -1,
         )
         heli_bomb_y = jnp.where(
@@ -1669,6 +1675,16 @@ class JaxJamesBond(
             state.helicopter_y + self.consts.HELICOPTER_ENEMY_HEIGHT,
             heli_bomb_y,
         )
+        ## Aim once on release: fall towards whichever side the player is on
+        ## right now. No homing afterwards, teleporting the player mid fall
+        ## changes nothing in the real game.
+        player_center = state.player_x + self.consts.PLAYER_WIDTH // 2
+        aimed_vx = jnp.where(
+            player_center < heli_bomb_x,
+            -self.consts.HELICOPTER_BOMB_SPEED_X,
+            self.consts.HELICOPTER_BOMB_SPEED_X,
+        ).astype(jnp.int32)
+        heli_bomb_vx = jnp.where(drop_bomb, aimed_vx, state.helicopter_bomb_vx)
         heli_bomb_active = jnp.logical_or(heli_bomb_active, drop_bomb)
 
         ## 3. Satellite laser. Simple kitchen timer: counts down while a
@@ -1704,6 +1720,7 @@ class JaxJamesBond(
         return state.replace(
             helicopter_bomb_x=heli_bomb_x.astype(jnp.int32),
             helicopter_bomb_y=heli_bomb_y.astype(jnp.int32),
+            helicopter_bomb_vx=heli_bomb_vx,
             helicopter_bomb_active=heli_bomb_active,
             satellite_laser_x=laser_x.astype(jnp.int32),
             satellite_laser_y=laser_y.astype(jnp.int32),
