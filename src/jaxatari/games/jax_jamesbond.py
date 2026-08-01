@@ -1527,7 +1527,7 @@ class JaxJamesBond(
         )
         next_diamond_y = jnp.where(
             spawn_diamond,
-            57.0, ## TODO: Diamond spawn height, will change if the number is wrong
+            57, ## TODO: Diamond spawn height, will change if the number is wrong
             next_diamond_y
         )
         # Scubas
@@ -1547,7 +1547,7 @@ class JaxJamesBond(
         )
         next_helicopter_y = jnp.where(
             spawn_helicopter,
-            57.0, ## TODO: Helicopter spawn height, will change if the number is wrong
+            57, ## TODO: Helicopter spawn height, will change if the number is wrong
             next_helicopter_y
         )
         ## Satellite
@@ -1560,7 +1560,7 @@ class JaxJamesBond(
         )
         next_satellite_y = jnp.where(
             can_spawn_satellite,
-            75.0, ## TODO: Satellite spawn height, will change if the number is wrong
+            75, ## TODO: Satellite spawn height, will change if the number is wrong
             next_satellite_y
         )
         ## Fire pit
@@ -1576,7 +1576,7 @@ class JaxJamesBond(
         )
         next_pit_y = jnp.where(
             can_spawn_pit,
-            122.0, ## TODO: Pit spawn height, will change if the number is wrong
+            122, ## TODO: Pit spawn height, will change if the number is wrong
             next_pit_y
         )
 
