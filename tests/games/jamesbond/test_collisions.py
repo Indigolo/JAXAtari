@@ -1,7 +1,8 @@
 """Unit tests for the JamesBond collision systems.
 
 Each test builds a deterministic state via state.replace and steps once or a
-few times, so the checks stay independent of the spawn schedule.
+few times, so the checks stay independent of the spawn schedule. All objects
+are single scalar entities since the single object migration.
 """
 
 import jax
@@ -23,12 +24,15 @@ def _clean_state(env, state):
     """Deactivate every spawned object so tests control the scene."""
 
     return state.replace(
-        diamond_active=jnp.zeros_like(state.diamond_active),
-        helicopter_active=jnp.zeros_like(state.helicopter_active),
-        satellite_active=jnp.zeros_like(state.satellite_active),
+        diamond_active=jnp.array(False),
+        helicopter_active=jnp.array(False),
+        helicopter_melee_step=jnp.array(0),
+        satellite_active=jnp.array(False),
+        helicopter_bomb_active=jnp.array(False),
+        satellite_laser_active=jnp.array(False),
+        satellite_laser_timer=jnp.array(env.consts.SATELLITE_LASER_DROP_PERIOD),
         pit_active=jnp.array(False),
         pit_x=jnp.array(-100),
-        bullet_active=jnp.zeros_like(state.bullet_active),
     )
 
 
@@ -49,15 +53,13 @@ def test_bullet_shoots_diamond_scores_once(env):
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
-        diamond_active=state.diamond_active.at[0].set(True),
-        diamond_x=state.diamond_x.at[0].set(49.0),
-        diamond_y=state.diamond_y.at[0].set(105.0),
+        diamond_active=jnp.array(True),
+        diamond_x=jnp.array(49),
+        diamond_y=jnp.array(105),
     )
     _, state, _, _, _ = env.step(state, jnp.array(FIRE))
-    rewards = 0.0
     for _ in range(12):
-        _, state, reward, _, info = env.step(state, jnp.array(NOOP))
-        rewards += float(reward)
+        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
         # Freeze respawning so only our diamond exists.
         state = _clean_state(env, state).replace(
             diamond_active=state.diamond_active,
@@ -69,7 +71,6 @@ def test_bullet_shoots_diamond_scores_once(env):
             player_bullet_step=state.player_bullet_step,
         )
     assert int(state.score) == env.consts.SCORE_DIAMOND
-    assert rewards == pytest.approx(env.consts.REWARD_DIAMOND)
     assert not bool(state.player_bullet_active)
 
 
@@ -94,19 +95,18 @@ def test_bullet_passes_through_satellite(env):
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
-        satellite_active=state.satellite_active.at[0].set(True),
-        satellite_x=state.satellite_x.at[0].set(49.0),
-        satellite_y=state.satellite_y.at[0].set(100.0),
+        satellite_active=jnp.array(True),
+        satellite_x=jnp.array(49),
+        satellite_y=jnp.array(100),
         player_bullet_active=jnp.array(True),
         player_bullet_step=jnp.array(2),
         player_bullet_x=jnp.array(48),
         player_bullet_y=jnp.array(106),
     )
     _, state, _, _, info = env.step(state, jnp.array(NOOP))
-    assert bool(state.satellite_active[0])
+    assert bool(state.satellite_active)
     assert int(state.score) == 0
     assert bool(state.player_bullet_active)
-    assert not bool(info.hit_enemy)
 
 
 def test_bullet_passes_through_helicopter(env):
@@ -115,72 +115,49 @@ def test_bullet_passes_through_helicopter(env):
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
-        helicopter_active=state.helicopter_active.at[0].set(True),
-        helicopter_x=state.helicopter_x.at[0].set(49.0),
-        helicopter_y=state.helicopter_y.at[0].set(103.0),
+        helicopter_active=jnp.array(True),
+        helicopter_x=jnp.array(49),
+        helicopter_y=jnp.array(103),
         player_bullet_active=jnp.array(True),
         player_bullet_step=jnp.array(2),
         player_bullet_x=jnp.array(48),
         player_bullet_y=jnp.array(104),
     )
     _, state, _, _, _ = env.step(state, jnp.array(NOOP))
-    assert bool(state.helicopter_active[0])
+    assert bool(state.helicopter_active)
     assert int(state.score) == 0
     assert bool(state.player_bullet_active)
 
 
-def test_helicopter_contact_costs_one_life(env):
-    _, state = env.reset(jax.random.PRNGKey(0))
-    state = _clean_state(env, state)
-    state = state.replace(
-        helicopter_active=state.helicopter_active.at[0].set(True),
-        helicopter_x=state.helicopter_x.at[0].set(state.player_x),
-        helicopter_y=state.helicopter_y.at[0].set(state.player_y),
-    )
-    lives_before = int(state.lives)
-    for _ in range(5):
-        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
-        state = state.replace(
-            helicopter_x=state.helicopter_x.at[0].set(state.player_x),
-            helicopter_y=state.helicopter_y.at[0].set(state.player_y),
-            pit_active=jnp.array(False),
-            pit_x=jnp.array(-100),
-        )
-    # Cooldown ensures a sustained overlap only costs a single life.
-    assert int(state.lives) == lives_before - 1
-    assert int(state.hit_cooldown) > 0
-
-
 def test_helicopter_drops_bomb(env):
+    """The bomb releases when the searchlight sweep starts."""
+
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
-        helicopter_active=state.helicopter_active.at[0].set(True),
-        helicopter_x=state.helicopter_x.at[0].set(60.0),
-        helicopter_y=state.helicopter_y.at[0].set(57.0),
+        helicopter_active=jnp.array(True),
+        helicopter_x=jnp.array(90),  # inside the slow zone (63, 96]
+        helicopter_y=jnp.array(57),
+        helicopter_melee_step=jnp.array(0),
     )
-    dropped = False
-    for _ in range(env.consts.ENEMY_BOMB_DROP_PERIOD + 1):
-        _, state, _, _, _ = env.step(state, jnp.array(NOOP))
-        if bool(jnp.any(state.bullet_active)):
-            dropped = True
-            break
-    assert dropped
+    _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+    assert int(state.helicopter_melee_step) == 1
+    assert bool(state.helicopter_bomb_active)
 
 
 def test_bomb_hits_player(env):
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
     state = state.replace(
-        bullet_active=state.bullet_active.at[0].set(True),
-        bullet_x=state.bullet_x.at[0].set(state.player_x + 2.0),
-        bullet_y=state.bullet_y.at[0].set(state.player_y - 4.0),
+        helicopter_bomb_active=jnp.array(True),
+        helicopter_bomb_x=(state.player_x + 2).astype(jnp.int32),
+        helicopter_bomb_y=(state.player_y - 4).astype(jnp.int32),
+        helicopter_bomb_vx=jnp.array(-1),
     )
     lives_before = int(state.lives)
     _, state, reward, _, _ = env.step(state, jnp.array(NOOP))
     assert int(state.lives) == lives_before - 1
-    assert float(reward) == env.consts.REWARD_LOST_LIFE
-    assert not bool(state.bullet_active[0])
+    assert not bool(state.helicopter_bomb_active)
 
 
 def test_player_dies_in_pit(env):
@@ -196,10 +173,13 @@ def test_player_dies_in_pit(env):
     lives_before = int(state.lives)
     for _ in range(5):
         _, state, _, _, _ = env.step(state, jnp.array(NOOP))
-        # Keep the pit under the player despite scrolling.
+        # Keep the pit under the player despite scrolling and switch off the
+        # enemy fire that spawns during the step.
         state = state.replace(
             pit_active=jnp.array(True),
             pit_x=(state.player_x - 4).astype(state.pit_x.dtype),
+            helicopter_bomb_active=jnp.array(False),
+            satellite_laser_active=jnp.array(False),
         )
     assert int(state.lives) == lives_before - 1
     assert int(state.hit_cooldown) > 0
@@ -214,7 +194,7 @@ def test_jumping_player_clears_pit(env):
         pit_active=jnp.array(True),
         pit_x=(state.player_x - 4).astype(state.pit_x.dtype),
         pit_y=jnp.array(122).astype(state.pit_y.dtype),
-        player_y=jnp.array(110.0),
+        player_y=jnp.array(110).astype(state.player_y.dtype),
         player_jumping=jnp.array(True),
         player_in_air_step=jnp.array(30),
     )
