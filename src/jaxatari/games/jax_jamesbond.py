@@ -287,10 +287,9 @@ class JamesBondObservation:
 
     player: ObjectObservation
     diamonds: ObjectObservation
-    enemies: ObjectObservation
     player_velocity: jnp.ndarray
-    ## helicopters: ObjectObservation
-    ## satellites: ObjectObservation
+    helicopters: ObjectObservation
+    satellites: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -464,8 +463,9 @@ class JaxJamesBond(
         return spaces.Dict(
             {
                 "player": spaces.get_object_space(n=None, screen_size=screen_size),
+                ## Diamond is a single object now like the enemies
                 "diamonds": spaces.get_object_space(
-                    n=self.consts.MAX_DIAMONDS, screen_size=screen_size
+                    n=None, screen_size=screen_size
                 ),
                 "player_velocity": spaces.Box(
                     low=jnp.array([-10.0, -20.0], dtype=jnp.float32),
@@ -473,17 +473,15 @@ class JaxJamesBond(
                     shape=(2,),
                     dtype=jnp.float32,
                 ),
-                "enemies": spaces.get_object_space(
-                    n=self.consts.MAX_ENEMIES, screen_size=screen_size
+                "helicopters": spaces.get_object_space(
+                    n=None, screen_size=screen_size
                 ),
-                ## "helicopters": spaces.get_object_space(
-                ##     n=self.consts.MAX_HELICOPTERS, screen_size=screen_size
-                ## ),
-                ## "satellites": spaces.get_object_space(
-                ##     n=self.consts.MAX_SATELLITES, screen_size=screen_size
-                ## ),
+                "satellites": spaces.get_object_space(
+                    n=None, screen_size=screen_size
+                ),
+                ## player air bullet, player water bullet, helicopter bomb, satellite laser
                 "bullets": spaces.get_object_space(
-                    n=self.consts.MAX_BULLETS, screen_size=screen_size
+                    n=4, screen_size=screen_size
                 ),
                 "lives": spaces.Box(
                     low=0,
@@ -535,38 +533,43 @@ class JaxJamesBond(
             self.consts.DIAMOND_WIDTH,
             self.consts.DIAMOND_HEIGHT,
         )
-        enemies = self._object_group_observation(
-            state.enemy_x,
-            state.enemy_y,
-            state.enemy_active,
-            self.consts.ENEMY_WIDTH,
-            self.consts.ENEMY_HEIGHT,
+        helicopters = self._object_group_observation(
+            state.helicopter_x,
+            state.helicopter_y,
+            state.helicopter_active,
+            self.consts.HELICOPTER_ENEMY_WIDTH,
+            self.consts.HELICOPTER_ENEMY_HEIGHT,
         )
-        ## helicopters = self._object_group_observation(
-        ##     state.helicopter_x,
-        ##     state.helicopter_y,
-        ##     state.helicopter_active,
-        ##     self.consts.HELICOPTER_ENEMY_WIDTH,
-        ##     self.consts.HELICOPTER_ENEMY_HEIGHT,
-        ## )
-        ## satellites = self._object_group_observation(
-        ##     state.satellite_x,
-        ##     state.satellite_y,
-        ##     state.satellite_active,
-        ##     self.consts.SATELLITE_ENEMY_WIDTH,
-        ##     self.consts.SATELLITE_ENEMY_HEIGHT,
-        ## )
+        satellites = self._object_group_observation(
+            state.satellite_x,
+            state.satellite_y,
+            state.satellite_active,
+            self.consts.SATELLITE_ENEMY_WIDTH,
+            self.consts.SATELLITE_ENEMY_HEIGHT,
+        )
+        ## All four projectiles in one group, they share the same 1x4 sprite:
+        ## player air bullet, player water bullet, helicopter bomb, satellite laser
         bullets = self._object_group_observation(
-            state.bullet_x,
-            state.bullet_y,
-            state.bullet_active,
+            jnp.stack([
+                state.player_bullet_x,
+                state.player_wbullet_x,
+                state.helicopter_bomb_x,
+                state.satellite_laser_x,
+            ]),
+            jnp.stack([
+                state.player_bullet_y,
+                state.player_wbullet_y,
+                state.helicopter_bomb_y,
+                state.satellite_laser_y,
+            ]),
+            jnp.stack([
+                state.player_bullet_active,
+                state.player_wbullet_active,
+                state.helicopter_bomb_active,
+                state.satellite_laser_active,
+            ]),
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            ## bullet_vx is a scalar, so broadcast the orientation to one value
-            ## per bullet slot or the observation loses features vs the space.
-            orientation=jnp.broadcast_to(
-                jnp.where(state.bullet_vx < 0, 270.0, 90.0), state.bullet_x.shape
-            ),
         )
         return JamesBondObservation(
             player=player,
@@ -574,9 +577,8 @@ class JaxJamesBond(
                 jnp.float32
             ),
             diamonds=diamonds,
-            enemies=enemies,
-            ## helicopters=helicopters,
-            ## satellites=satellites,
+            helicopters=helicopters,
+            satellites=satellites,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
