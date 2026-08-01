@@ -178,6 +178,14 @@ class JamesBondConstants(struct.PyTreeNode):
     ## teleporting the player around via RAM.
     HELICOPTER_BOMB_SPEED_X: int = struct.field(pytree_node=False, default=1)
     HELICOPTER_BOMB_VY: int = struct.field(pytree_node=False, default=2) ## falls 2px per frame
+    ## Drop trigger is player relative, not screen relative. Measured in ALE:
+    ## first bomb releases when the heli closes to ~66-70 real px of the player
+    ## (that is ~31 in our half width coordinates), later bombs at ~30 real px
+    ## (~14 here). The old fixed searchlight zone only matched because the test
+    ## player never moved. TODO: the melee zone probably wants the same
+    ## treatment, talk to Indi before touching it.
+    HELICOPTER_BOMB_RANGE_FAR: int = struct.field(pytree_node=False, default=31)
+    HELICOPTER_BOMB_RANGE_NEAR: int = struct.field(pytree_node=False, default=14)
     SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
 
@@ -266,6 +274,7 @@ class JamesBondState:
     helicopter_bomb_y: chex.Array
     helicopter_bomb_vx: chex.Array ## +-1, aimed at the player once on release
     helicopter_bomb_active: chex.Array
+    helicopter_bombs_dropped: chex.Array ## 0, 1 or 2 this pass, resets with the heli
     satellite_laser_x: chex.Array
     satellite_laser_y: chex.Array
     satellite_laser_active: chex.Array
@@ -397,6 +406,7 @@ class JaxJamesBond(
             helicopter_bomb_y=jnp.array(-1, dtype=jnp.int32),
             helicopter_bomb_vx=jnp.array(0, dtype=jnp.int32),
             helicopter_bomb_active=jnp.array(False, dtype=jnp.bool_),
+            helicopter_bombs_dropped=jnp.array(0, dtype=jnp.int32),
             satellite_laser_x=jnp.array(-1, dtype=jnp.int32),
             satellite_laser_y=jnp.array(-1, dtype=jnp.int32),
             satellite_laser_active=jnp.array(False, dtype=jnp.bool_),
@@ -1651,12 +1661,29 @@ class JaxJamesBond(
         )
         laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < ground)
 
-        ## 2. Helicopter drop. The real game releases the bomb right when the
-        ## searchlight starts, so we listen to the melee step counter: it only
-        ## ever passes 1 on the first frame of a sweep. No sweep, no bomb.
+        ## 2. Helicopter drop. Measured against the ROM: the trigger is the
+        ## distance to the player, not the searchlight. First bomb when the
+        ## heli closes to RANGE_FAR, one more at RANGE_NEAR. The near one can
+        ## happen while the heli is basically on top of the player or already
+        ## past, which is why bombs also fall right diagonal in the real game.
+        distance = state.helicopter_x - state.player_x
+        drop_far = jnp.logical_and(
+            state.helicopter_bombs_dropped == 0,
+            distance <= self.consts.HELICOPTER_BOMB_RANGE_FAR,
+        )
+        drop_near = jnp.logical_and(
+            state.helicopter_bombs_dropped == 1,
+            distance <= self.consts.HELICOPTER_BOMB_RANGE_NEAR,
+        )
         drop_bomb = jnp.logical_and(
-            jnp.logical_and(state.helicopter_active, state.helicopter_melee_step == 1),
+            jnp.logical_and(state.helicopter_active, jnp.logical_or(drop_far, drop_near)),
             jnp.logical_not(heli_bomb_active),
+        )
+        ## Count this pass's drops, forget the count once the heli is gone
+        bombs_dropped = jnp.where(
+            state.helicopter_active,
+            state.helicopter_bombs_dropped + drop_bomb.astype(jnp.int32),
+            0,
         )
         heli_bomb_x = jnp.where(
             drop_bomb,
@@ -1715,6 +1742,7 @@ class JaxJamesBond(
             helicopter_bomb_y=heli_bomb_y.astype(jnp.int32),
             helicopter_bomb_vx=heli_bomb_vx,
             helicopter_bomb_active=heli_bomb_active,
+            helicopter_bombs_dropped=bombs_dropped,
             satellite_laser_x=laser_x.astype(jnp.int32),
             satellite_laser_y=laser_y.astype(jnp.int32),
             satellite_laser_active=laser_active,

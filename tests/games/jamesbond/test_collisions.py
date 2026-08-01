@@ -130,19 +130,19 @@ def test_bullet_passes_through_helicopter(env):
 
 
 def test_helicopter_drops_bomb(env):
-    """The bomb releases when the searchlight sweep starts."""
+    """The first bomb releases when the heli closes to RANGE_FAR of the player."""
 
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
+    far = env.consts.HELICOPTER_BOMB_RANGE_FAR
     state = state.replace(
         helicopter_active=jnp.array(True),
-        helicopter_x=jnp.array(90),  # inside the slow zone (63, 96]
+        helicopter_x=(state.player_x + far - 1).astype(jnp.int32),  # just in range
         helicopter_y=jnp.array(57),
-        helicopter_melee_step=jnp.array(0),
     )
     _, state, _, _, _ = env.step(state, jnp.array(NOOP))
-    assert int(state.helicopter_melee_step) == 1
     assert bool(state.helicopter_bomb_active)
+    assert int(state.helicopter_bombs_dropped) == 1
 
 
 def test_bomb_hits_player(env):
