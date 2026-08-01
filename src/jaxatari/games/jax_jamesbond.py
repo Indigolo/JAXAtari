@@ -1804,7 +1804,8 @@ class JaxJamesBond(
             player_bullet_step=player_bullet_step,
             player_bullet_x=player_bullet_x,
             player_bullet_y=player_bullet_y,
-            score=state.score + self.consts.SCORE_DIAMOND,
+            ## Only add points for actual hits, not every frame the bullet flies
+            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
