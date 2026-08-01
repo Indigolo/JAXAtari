@@ -170,10 +170,13 @@ class JamesBondConstants(struct.PyTreeNode):
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
-    ## Helicopter bombs (enemy fire), stored in the generic bullet_* arrays.
-    ENEMY_BOMB_DROP_PERIOD: int = struct.field(pytree_node=False, default=60) ## Frames between drops
-    ENEMY_BOMB_FALL_SPEED: float = struct.field(pytree_node=False, default=1.0)
-    ENEMY_BOMB_DRIFT_SPEED: float = struct.field(pytree_node=False, default=0.25) ## Match the ground scroll speed
+    ## Enemy fire: one helicopter bomb and one satellite laser, single objects
+    ## like everything else. Numbers checked against the real ROM in ALE frame
+    ## by frame, not guessed.
+    HELICOPTER_BOMB_VX: int = struct.field(pytree_node=False, default=-1) ## bomb slides 1px left per frame while falling
+    HELICOPTER_BOMB_VY: int = struct.field(pytree_node=False, default=2) ## and falls 2px per frame
+    SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
+    SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -256,6 +259,14 @@ class JamesBondState:
     satellite_x: chex.Array
     satellite_y: chex.Array
     satellite_active: chex.Array
+    ## Enemy fire, single objects (the 2600 also only had one missile per object)
+    helicopter_bomb_x: chex.Array
+    helicopter_bomb_y: chex.Array
+    helicopter_bomb_active: chex.Array
+    satellite_laser_x: chex.Array
+    satellite_laser_y: chex.Array
+    satellite_laser_active: chex.Array
+    satellite_laser_timer: chex.Array ## counts down to the next laser drop
     bullet_x: chex.Array
     bullet_y: chex.Array
     bullet_active: chex.Array
@@ -384,6 +395,16 @@ class JaxJamesBond(
             satellite_x=jnp.array(0, dtype=jnp.int32),
             satellite_y=jnp.array(0, dtype=jnp.int32),
             satellite_active=jnp.array(0, dtype=jnp.bool_),
+            helicopter_bomb_x=jnp.array(-1, dtype=jnp.int32),
+            helicopter_bomb_y=jnp.array(-1, dtype=jnp.int32),
+            helicopter_bomb_active=jnp.array(False, dtype=jnp.bool_),
+            satellite_laser_x=jnp.array(-1, dtype=jnp.int32),
+            satellite_laser_y=jnp.array(-1, dtype=jnp.int32),
+            satellite_laser_active=jnp.array(False, dtype=jnp.bool_),
+            ## Start full so the first laser comes one full period after the satellite shows up
+            satellite_laser_timer=jnp.array(
+                self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32
+            ),
             bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
             bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
             bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
@@ -1600,52 +1621,94 @@ class JaxJamesBond(
             pit_active=next_pit_active
         )
 
-    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState: ## TODO: Way too complex, can easily optimize
-        """Move falling helicopter bombs and periodically drop new ones.
+    def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
+        """Move and spawn the helicopter bomb and the satellite laser."""
 
-        Bombs live in the generic bullet_* arrays. They fall straight down
-        while keeping the world-scroll drift, and despawn once they are
-        fully below the player's row.
-        """
+        ## The old version still indexed helicopter_x like an array and crashed
+        ## every step after the single object change. Rewritten for scalars.
+        ground = self.consts.GAME_AREA_MAX_Y
 
-        # === 1. Move active bombs, despawn below the play area ===
-        next_bomb_x = state.bullet_x - self.consts.ENEMY_BOMB_DRIFT_SPEED
-        next_bomb_y = state.bullet_y + self.consts.ENEMY_BOMB_FALL_SPEED
-        bomb_on_screen = next_bomb_y <= (
-            self.consts.GAME_AREA_MAX_Y + self.consts.PLAYER_HEIGHT
+        ## 1. Move whatever is flying, remove it once it reaches the ground
+        ## (checked in the real game: they just disappear there, no explosion)
+        heli_bomb_x = jnp.where(
+            state.helicopter_bomb_active,
+            state.helicopter_bomb_x + self.consts.HELICOPTER_BOMB_VX,
+            -1,
         )
-        next_bomb_active = jnp.logical_and(state.bullet_active, bomb_on_screen)
-
-        # === 2. Periodic drop from the first active helicopter ===
-        drop_frame = (state.step_count % self.consts.ENEMY_BOMB_DROP_PERIOD) == 0
-        shooter_idx = jnp.argmax(state.helicopter_active)
-        has_shooter = jnp.any(state.helicopter_active)
-        free_slot = jnp.argmax(jnp.logical_not(next_bomb_active))
-        has_free_slot = jnp.any(jnp.logical_not(next_bomb_active))
-        do_drop = jnp.logical_and(
-            jnp.logical_and(drop_frame, has_shooter), has_free_slot
+        heli_bomb_y = jnp.where(
+            state.helicopter_bomb_active,
+            state.helicopter_bomb_y + self.consts.HELICOPTER_BOMB_VY,
+            -1,
+        )
+        heli_bomb_active = jnp.logical_and(
+            state.helicopter_bomb_active, heli_bomb_y < ground
         )
 
-        drop_x = (
-            state.helicopter_x[shooter_idx]
-            + self.consts.HELICOPTER_ENEMY_WIDTH / 2
+        laser_x = jnp.where(state.satellite_laser_active, state.satellite_laser_x, -1)
+        laser_y = jnp.where(
+            state.satellite_laser_active,
+            state.satellite_laser_y + self.consts.SATELLITE_LASER_FALL_SPEED,
+            -1,
         )
-        drop_y = state.helicopter_y[shooter_idx] + self.consts.HELICOPTER_ENEMY_HEIGHT
+        laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < ground)
 
-        next_bomb_x = next_bomb_x.at[free_slot].set(
-            jnp.where(do_drop, drop_x, next_bomb_x[free_slot])
+        ## 2. Helicopter drop. The real game releases the bomb right when the
+        ## searchlight starts, so we listen to the melee step counter: it only
+        ## ever passes 1 on the first frame of a sweep. No sweep, no bomb.
+        drop_bomb = jnp.logical_and(
+            jnp.logical_and(state.helicopter_active, state.helicopter_melee_step == 1),
+            jnp.logical_not(heli_bomb_active),
         )
-        next_bomb_y = next_bomb_y.at[free_slot].set(
-            jnp.where(do_drop, drop_y, next_bomb_y[free_slot])
+        heli_bomb_x = jnp.where(
+            drop_bomb,
+            state.helicopter_x + self.consts.HELICOPTER_ENEMY_WIDTH // 2,
+            heli_bomb_x,
         )
-        next_bomb_active = next_bomb_active.at[free_slot].set(
-            jnp.where(do_drop, True, next_bomb_active[free_slot])
+        heli_bomb_y = jnp.where(
+            drop_bomb,
+            state.helicopter_y + self.consts.HELICOPTER_ENEMY_HEIGHT,
+            heli_bomb_y,
+        )
+        heli_bomb_active = jnp.logical_or(heli_bomb_active, drop_bomb)
+
+        ## 3. Satellite laser. Simple kitchen timer: counts down while a
+        ## satellite is on screen, drops from its belly at zero, rewinds.
+        ## Parked at full while no satellite is around, so every new pass
+        ## starts a fresh countdown.
+        laser_timer = jnp.where(
+            state.satellite_active,
+            jnp.maximum(state.satellite_laser_timer - 1, 0),
+            jnp.array(self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32),
+        )
+        drop_laser = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, laser_timer == 0),
+            jnp.logical_not(laser_active),
+        )
+        laser_x = jnp.where(
+            drop_laser,
+            state.satellite_x + self.consts.SATELLITE_ENEMY_WIDTH // 2,
+            laser_x,
+        )
+        laser_y = jnp.where(
+            drop_laser,
+            state.satellite_y + self.consts.SATELLITE_ENEMY_HEIGHT,
+            laser_y,
+        )
+        laser_active = jnp.logical_or(laser_active, drop_laser)
+        laser_timer = jnp.where(
+            drop_laser,
+            jnp.array(self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32),
+            laser_timer,
         )
 
         return state.replace(
-            bullet_x=next_bomb_x,
-            bullet_y=next_bomb_y,
-            bullet_active=next_bomb_active,
+            helicopter_bomb_x=heli_bomb_x.astype(jnp.int32),
+            helicopter_bomb_y=heli_bomb_y.astype(jnp.int32),
+            helicopter_bomb_active=heli_bomb_active,
+            satellite_laser_x=laser_x.astype(jnp.int32),
+            satellite_laser_y=laser_y.astype(jnp.int32),
+            satellite_laser_active=laser_active,
+            satellite_laser_timer=laser_timer,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
@@ -1675,31 +1738,46 @@ class JaxJamesBond(
         state = self._resolve_pit_player_collisions(state)
         return state
 
-    def _resolve_bullet_player_collisions(self, state: JamesBondState) -> JamesBondState: ## TODO: Make into multi-bullet
-        """Apply one life of damage when a helicopter bullet hits the player.
+    def _resolve_bullet_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """One life of damage when the bomb or the laser hits the player.
 
-        The bullet always deactivates on contact; the life is only
-        lost when the hit cooldown has expired, mirroring the hazard rule.
+        The projectile always disappears on contact, the life is only lost
+        when the hit cooldown ran out, same rule as the pit. Manual says the
+        laser destroys on impact and can't be shot down in stage 1.
         """
 
-        overlaps = _aabb_overlap(
+        bomb_overlap = _aabb_overlap(
             state.player_x,
             state.player_y,
             self.consts.PLAYER_COLLISION_WIDTH,
             self.consts.PLAYER_COLLISION_HEIGHT,
-            state.bullet_x,
-            state.bullet_y,
+            state.helicopter_bomb_x,
+            state.helicopter_bomb_y,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
         )
-        hits = jnp.logical_and(state.bullet_active, overlaps)
-        hit_any = jnp.any(hits)
+        laser_overlap = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.satellite_laser_x,
+            state.satellite_laser_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+        )
+        bomb_hit = jnp.logical_and(state.helicopter_bomb_active, bomb_overlap)
+        laser_hit = jnp.logical_and(state.satellite_laser_active, laser_overlap)
+        hit_any = jnp.logical_or(bomb_hit, laser_hit)
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(hit_any, can_take_damage)
 
         return state.replace(
-            bullet_active=jnp.logical_and(
-                state.bullet_active, jnp.logical_not(hits)
+            helicopter_bomb_active=jnp.logical_and(
+                state.helicopter_bomb_active, jnp.logical_not(bomb_hit)
+            ),
+            satellite_laser_active=jnp.logical_and(
+                state.satellite_laser_active, jnp.logical_not(laser_hit)
             ),
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
