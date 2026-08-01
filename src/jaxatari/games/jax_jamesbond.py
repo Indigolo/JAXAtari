@@ -2161,28 +2161,31 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
     
-    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray: ## TODO: Make draw every bullet
-        """Draw all bullets."""
-        
-        active_bullets = jnp.concatenate([
-            jnp.array([state.player_bullet_active]),
-            state.bullet_active,
+    def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
+        """Draw all projectiles, they share the same 1x4 bullet sprite."""
+
+        ## player air bullet, player water bullet, helicopter bomb, satellite laser
+        active_bullets = jnp.stack([
+            state.player_bullet_active,
+            state.player_wbullet_active,
+            state.helicopter_bomb_active,
+            state.satellite_laser_active,
         ])
 
-        bullet_positions = jnp.vstack([
+        bullet_positions = jnp.stack([
             jnp.stack([state.player_bullet_x, state.player_bullet_y]),
-            jnp.stack(
-                [state.bullet_x, state.bullet_y],
-            ),
+            jnp.stack([state.player_wbullet_x, state.player_wbullet_y]),
+            jnp.stack([state.helicopter_bomb_x, state.helicopter_bomb_y]),
+            jnp.stack([state.satellite_laser_x, state.satellite_laser_y]),
         ])
 
         def render_single_bullet(i, current_raster):
             should_draw = (active_bullets[i] == 1)
 
             draw_fn = lambda r: self.jr.render_at_clipped(
-                r, 
-                bullet_positions[i][0], 
-                bullet_positions[i][1], 
+                r,
+                bullet_positions[i][0],
+                bullet_positions[i][1],
                 self.SHAPE_MASKS['bullet'],
             )
 
