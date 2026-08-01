@@ -123,7 +123,6 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
     MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
     MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
-    MAX_BULLETS: int = struct.field(pytree_node=False, default=4)
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
 
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
@@ -239,7 +238,6 @@ class JamesBondState:
     player_wbullet_step: chex.Array
     player_wbullet_x: chex.Array
     player_wbullet_y: chex.Array
-    bullet_vx: chex.Array
     lives: chex.Array
     score: chex.Array
     step_count: chex.Array
@@ -272,9 +270,6 @@ class JamesBondState:
     satellite_laser_y: chex.Array
     satellite_laser_active: chex.Array
     satellite_laser_timer: chex.Array ## counts down to the next laser drop
-    bullet_x: chex.Array
-    bullet_y: chex.Array
-    bullet_active: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -374,7 +369,6 @@ class JaxJamesBond(
             player_wbullet_step=jnp.array(-1, dtype=jnp.int32),
             player_wbullet_x=jnp.array(-1, dtype=jnp.int32),
             player_wbullet_y=jnp.array(-1, dtype=jnp.int32),
-            bullet_vx=jnp.array(0, dtype=jnp.float32),
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
@@ -410,9 +404,6 @@ class JaxJamesBond(
             satellite_laser_timer=jnp.array(
                 self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32
             ),
-            bullet_x=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
-            bullet_y=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.int32),
-            bullet_active=jnp.zeros((self.consts.MAX_BULLETS,), dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
