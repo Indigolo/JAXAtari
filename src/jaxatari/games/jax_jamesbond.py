@@ -166,7 +166,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=12) ## < SATELLITE_ENEMY_HEIGHT 14
     PIT_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=12)  ## < PIT_WIDTH 16, edge taps survivable
 
-    SCORE_DIAMOND: int = struct.field(pytree_node=False, default=100)
+    SCORE_DIAMOND: int = struct.field(pytree_node=False, default=50) ## Manual scoring table says diamond = 50
     SCORE_ENEMY: int = struct.field(pytree_node=False, default=250)
     HIT_COOLDOWN_STEPS: int = struct.field(pytree_node=False, default=60)
 
