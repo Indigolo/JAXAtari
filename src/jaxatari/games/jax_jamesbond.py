@@ -152,7 +152,10 @@ class JamesBondConstants(struct.PyTreeNode):
     MAX_ENEMIES: int = struct.field(pytree_node=False, default=8)
     MAX_HELICOPTERS: int = struct.field(pytree_node=False, default=4)
     MAX_SATELLITES: int = struct.field(pytree_node=False, default=4)
-    MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=5000)
+    ## Reaching the second water scene takes ~9000 clean frames (land
+    ## 4454 + water 4435 + death freezes), so the old 5000 cap ended every
+    ## episode before the dock bonus could ever pay out.
+    MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=20000)
 
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=13) ##TODO: There is 13 pixels in the diamond sprite, including the shining thing of diamond 
@@ -226,7 +229,10 @@ class JamesBondConstants(struct.PyTreeNode):
     ## one rarer than the last (chance / (1 + drops so far)), which lands at
     ## roughly: one bomb common, two rarer, three much rarer, four rare.
     HELICOPTER_BOMB_DROP_CHANCE: float = struct.field(pytree_node=False, default=0.5)
-    SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
+    ## Land cadence: the pass is ~204 frames and the real game usually
+    ## drops 2 lasers per pass at 30-90 frame spacings; a 75-frame timer
+    ## lands on 2 drops per pass (52 was giving 3-4).
+    SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=75)
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
 
     ## Stage progression, measured clean (death freezes subtracted) in ALE:
@@ -278,7 +284,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SCORE_ROCKET: int = struct.field(pytree_node=False, default=200)
     ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
     ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
-    ROCKET_Y: int = struct.field(pytree_node=False, default=127) ## floats with its tip above the surface
+    ROCKET_Y: int = struct.field(pytree_node=False, default=138) ## rests low in the water (measured ~y140-150 in ALE); a diving boat can ram it
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=180) ## frames afloat before launch
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
@@ -614,6 +620,11 @@ class JaxJamesBond(
 
         def live_step(state: JamesBondState) -> JamesBondState:
             state = state.replace(
+                ## The frame counter only ticks while the scene is alive:
+                ## the real game freezes its clock during the death
+                ## animation too, and every render animation and scroll
+                ## offset derives from this counter.
+                step_count=state.step_count + 1,
                 collected_diamond=jnp.array(False, dtype=jnp.bool_),
                 hit_enemy=jnp.array(False, dtype=jnp.bool_),
                 hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
@@ -650,9 +661,18 @@ class JaxJamesBond(
                 player_floating=sweep(state.player_floating, False),
                 player_fast_floating=sweep(state.player_fast_floating, False),
                 player_in_water_step=sweep(state.player_in_water_step, 0),
-                ## Every actor and projectile leaves with the fallen agent
+                ## Every actor and projectile leaves with the fallen agent.
+                ## The shots also park their coordinates: their logic does
+                ## not run while inactive, so a stale position would
+                ## resurrect the old shot on the first post-respawn FIRE.
                 player_bullet_active=sweep(state.player_bullet_active, False),
+                player_bullet_x=sweep(state.player_bullet_x, -1),
+                player_bullet_y=sweep(state.player_bullet_y, -1),
+                player_bullet_step=sweep(state.player_bullet_step, -1),
                 player_wbullet_active=sweep(state.player_wbullet_active, False),
+                player_wbullet_x=sweep(state.player_wbullet_x, -1),
+                player_wbullet_y=sweep(state.player_wbullet_y, -1),
+                player_wbullet_step=sweep(state.player_wbullet_step, -1),
                 helicopter_active=sweep(state.helicopter_active, False),
                 helicopter_melee_step=sweep(state.helicopter_melee_step, 0),
                 helicopter_bomb_active=sweep(state.helicopter_bomb_active, False),
@@ -670,7 +690,6 @@ class JaxJamesBond(
                 hit_cooldown=sweep(state.hit_cooldown, 0),
             )
 
-        state = state.replace(step_count=state.step_count + 1)
         state = jax.lax.cond(state.death_timer > 0, frozen_step, live_step, state)
 
         _, next_key = jax.random.split(state.key)
@@ -1643,6 +1662,15 @@ class JaxJamesBond(
                 False,
                 player_wbullet_active
             )
+
+            ## Park everything the moment the shot dies. The dispatcher
+            ## skips this logic entirely while the shot is inactive, so a
+            ## stale position would sit here until the next FIRE press and
+            ## resurrect the old shot mid-air (the review reproduced up to
+            ## ~20 swallowed presses from one stale off-screen exit).
+            player_wbullet_x = jnp.where(player_wbullet_active, player_wbullet_x, -1)
+            player_wbullet_y = jnp.where(player_wbullet_active, player_wbullet_y, -1)
+            player_wbullet_step = jnp.where(player_wbullet_active, player_wbullet_step, -1)
 
             return state.replace(
                 player_wbullet_active = player_wbullet_active,
@@ -2621,56 +2649,44 @@ class JaxJamesBond(
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
 
-        ## Gate per diamond slot: only active diamonds can be hit, and only
-        ## while the respective shot itself is active.
-        collected = jnp.logical_or(
-            jnp.logical_and(
-                jnp.logical_and(state.diamond_active, state.player_bullet_active),
-                air_overlap,
-            ),
-            jnp.logical_and(
-                jnp.logical_and(state.diamond_active, state.player_wbullet_active),
-                water_overlap,
-            ),
+        ## Gate per shot: only active diamonds can be hit, and only while
+        ## the respective shot itself is active. Each shot that scored is
+        ## the one consumed -- the review caught the water hit clearing the
+        ## land bullet instead of its own.
+        air_collected = jnp.logical_and(
+            jnp.logical_and(state.diamond_active, state.player_bullet_active),
+            air_overlap,
         )
+        water_collected = jnp.logical_and(
+            jnp.logical_and(state.diamond_active, state.player_wbullet_active),
+            water_overlap,
+        )
+        collected = jnp.logical_or(air_collected, water_collected)
         collected_any = jnp.any(collected)
         collected_count = jnp.sum(collected.astype(jnp.int32))
 
-        player_bullet_active = jnp.where(
-            jnp.logical_and(
-                state.player_bullet_active, 
-                jnp.logical_not(jnp.any(collected))
-            ),
-            state.player_bullet_active,
-            False
+        player_bullet_active = jnp.logical_and(
+            state.player_bullet_active, jnp.logical_not(jnp.any(air_collected))
+        )
+        player_wbullet_active = jnp.logical_and(
+            state.player_wbullet_active, jnp.logical_not(jnp.any(water_collected))
         )
 
-        player_bullet_x = jnp.where(
-            player_bullet_active,
-            state.player_bullet_x,
-            -1
-        )
-
-        player_bullet_y = jnp.where(
-            player_bullet_active,
-            state.player_bullet_y,
-            -1
-        )
-
-        player_bullet_step = jnp.where(
-            player_bullet_active,
-            state.player_bullet_step,
-            -1
-        )
+        def park(active, v):
+            return jnp.where(active, v, -1)
 
         return state.replace(
             diamond_active = jnp.logical_and( ## TODO: change diamond x and y?
                 state.diamond_active, ~collected
             ),
             player_bullet_active=player_bullet_active,
-            player_bullet_step=player_bullet_step,
-            player_bullet_x=player_bullet_x,
-            player_bullet_y=player_bullet_y,
+            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
+            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
+            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
+            player_wbullet_active=player_wbullet_active,
+            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
+            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
             ## Only add points for actual hits, not every frame the bullet flies
             score=state.score + collected_count * self.consts.SCORE_DIAMOND,
             collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
@@ -2679,10 +2695,12 @@ class JaxJamesBond(
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
         ## In the original game the bullet passes straight through helicopters
         ## and satellites without any visible response: the diamond is the
-        ## only object the player bullet collides with, so only that check
-        ## runs, and only while a bullet is in flight.
+        ## only object the player shots collide with, so only that check
+        ## runs, and only while either shot is in flight. (The review caught
+        ## the old gate checking only the land bullet, which made the water
+        ## shot's diamond collection dead code.)
         return lax.cond(
-            state.player_bullet_active,
+            jnp.logical_or(state.player_bullet_active, state.player_wbullet_active),
             self.collectible_collisions_logic,
             lambda s: s,
             state
@@ -2783,8 +2801,13 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self._render_bullets(raster, state)
 
-        ## Render life counter
-        raster = self.jr.render_indicator(raster, 9, 184, state.lives, self.SHAPE_MASKS['life'], 16, 3) ## TODO: Maybe 5 like in ALE?
+        ## Render life counter: the HUD shows RESERVE lives (max 3 icons),
+        ## not the life currently being played, matching the real game
+        raster = self.jr.render_indicator(
+            raster, 9, 184,
+            jnp.maximum(state.lives - 1, 0),
+            self.SHAPE_MASKS['life'], 16, 3,
+        )
         
         ## Render Score counter
         score_digits = self.jr.int_to_digits(state.score, 4) ## TODO: Max score 4 digits?
