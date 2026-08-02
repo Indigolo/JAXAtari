@@ -61,6 +61,7 @@ def get_default_asset_config() -> tuple:
             ## Water scene terrain and actors
             {'name': 'water', 'type': 'single', 'file': 'water_unkempt.npy'},
             {'name': 'seabed', 'type': 'single', 'file': 'seabed.npy'},
+            {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'}, ## solid 74,74,74 measured in ALE
             {
                 'name': 'scuba', 'type': 'group',
                 'files': ['scuba_1.npy', 'scuba_2.npy']
@@ -2239,6 +2240,14 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
+        ## The water scene has a gray sky; it goes under the stars so the
+        ## stars still twinkle on it like in the real scene
+        raster = jax.lax.cond(
+            state.stage == 1,
+            lambda r: self.jr.render_at_clipped(r, 4, 28, self.SHAPE_MASKS['water_sky']),
+            lambda r: r,
+            raster,
+        )
         raster = self._render_stars(raster, state)
         ## Terrain follows the scene: dry land in stage 0, water in stage 1
         raster = jax.lax.cond(
@@ -2319,7 +2328,7 @@ class JamesBondRenderer(JAXGameRenderer):
         sprite_idx = jnp.where(state.step_count % 2 == 0, 0, 1)
         return self.jr.render_at_clipped(
             raster,
-            0,  # x
+            4,  # x - the sprites were re-extracted from ALE columns 4..156
             0,  # y
             self.SHAPE_MASKS['stars'][sprite_idx],
         )
