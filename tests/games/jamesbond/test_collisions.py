@@ -140,7 +140,7 @@ def test_helicopter_drops_bomb(env):
     sure_env = JaxJamesBond(JamesBondConstants(HELICOPTER_BOMB_DROP_CHANCE=1.0))
     _, state = sure_env.reset(jax.random.PRNGKey(0))
     state = _clean_state(sure_env, state)
-    far = sure_env.consts.HELICOPTER_BOMB_RANGE_FAR
+    far = sure_env.consts.HELICOPTER_BOMB_RANGE
     state = state.replace(
         helicopter_active=jnp.array(True),
         helicopter_x=(state.player_x + far - 1).astype(jnp.int32),  # just in range

@@ -184,13 +184,14 @@ class JamesBondConstants(struct.PyTreeNode):
     ## (~14 here). The old fixed searchlight zone only matched because the test
     ## player never moved. TODO: the melee zone probably wants the same
     ## treatment, talk to Indi before touching it.
-    HELICOPTER_BOMB_RANGE_FAR: int = struct.field(pytree_node=False, default=31)
-    HELICOPTER_BOMB_RANGE_NEAR: int = struct.field(pytree_node=False, default=14)
-    ## The real game doesn't take every chance, passes come with 0, 1 or 2
-    ## bombs and the picker looks like the ROM's internal random generator
-    ## (it's not position, speed or the missile slot, we tested all three).
-    ## So each range crossing is one chance that succeeds with this
-    ## probability. Rough estimate, tune when someone disassembles the ROM.
+    HELICOPTER_BOMB_RANGE: int = struct.field(pytree_node=False, default=31) ## first chance when the heli closes to this (~66-70 real px, measured)
+    HELICOPTER_BOMB_RETRY_FRAMES: int = struct.field(pytree_node=False, default=45) ## next chance this many frames later (measured gaps 38-53)
+    HELICOPTER_BOMB_MAX_PER_PASS: int = struct.field(pytree_node=False, default=4)
+    ## The real picker looks like the ROM's internal random generator (it's
+    ## not position, speed or the missile slot, we tested all three). So:
+    ## while the heli is in range it gets a chance every RETRY_FRAMES, each
+    ## one rarer than the last (chance / (1 + drops so far)), which lands at
+    ## roughly: one bomb common, two rarer, three much rarer, four rare.
     HELICOPTER_BOMB_DROP_CHANCE: float = struct.field(pytree_node=False, default=0.5)
     SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
@@ -280,7 +281,8 @@ class JamesBondState:
     helicopter_bomb_y: chex.Array
     helicopter_bomb_vx: chex.Array ## +-1, aimed at the player once on release
     helicopter_bomb_active: chex.Array
-    helicopter_bombs_dropped: chex.Array ## 0, 1 or 2 this pass, resets with the heli
+    helicopter_bombs_dropped: chex.Array ## chances used this pass, resets with the heli
+    helicopter_bomb_timer: chex.Array ## frames until the next chance
     satellite_laser_x: chex.Array
     satellite_laser_y: chex.Array
     satellite_laser_active: chex.Array
@@ -413,6 +415,7 @@ class JaxJamesBond(
             helicopter_bomb_vx=jnp.array(0, dtype=jnp.int32),
             helicopter_bomb_active=jnp.array(False, dtype=jnp.bool_),
             helicopter_bombs_dropped=jnp.array(0, dtype=jnp.int32),
+            helicopter_bomb_timer=jnp.array(0, dtype=jnp.int32),
             satellite_laser_x=jnp.array(-1, dtype=jnp.int32),
             satellite_laser_y=jnp.array(-1, dtype=jnp.int32),
             satellite_laser_active=jnp.array(False, dtype=jnp.bool_),
@@ -1673,27 +1676,35 @@ class JaxJamesBond(
         ## happen while the heli is basically on top of the player or already
         ## past, which is why bombs also fall right diagonal in the real game.
         distance = state.helicopter_x - state.player_x
-        chance_far = jnp.logical_and(
-            state.helicopter_bombs_dropped == 0,
-            distance <= self.consts.HELICOPTER_BOMB_RANGE_FAR,
+        in_range = jnp.logical_and(
+            state.helicopter_active,
+            distance <= self.consts.HELICOPTER_BOMB_RANGE,
         )
-        chance_near = jnp.logical_and(
-            state.helicopter_bombs_dropped == 1,
-            distance <= self.consts.HELICOPTER_BOMB_RANGE_NEAR,
+        ## The timer sits at 0 outside the range, so entering it gives the
+        ## first chance right away, then one more every RETRY_FRAMES. Each
+        ## chance is consumed whether or not the coin flip succeeds, and
+        ## every next chance is rarer than the one before.
+        bomb_timer = jnp.where(
+            in_range, jnp.maximum(state.helicopter_bomb_timer - 1, 0), 0
         )
-        ## One chance per range crossing. The chance is consumed either way,
-        ## the coin flip decides if a bomb actually comes out, that's how the
-        ## real game ends up with 0, 1 or 2 bombs per pass.
         chance = jnp.logical_and(
-            state.helicopter_active, jnp.logical_or(chance_far, chance_near)
+            jnp.logical_and(in_range, bomb_timer == 0),
+            state.helicopter_bombs_dropped < self.consts.HELICOPTER_BOMB_MAX_PER_PASS,
         )
         roll = jax.random.uniform(
             jax.random.fold_in(state.key, state.helicopter_bombs_dropped)
         )
-        lucky = roll < self.consts.HELICOPTER_BOMB_DROP_CHANCE
+        lucky = roll < self.consts.HELICOPTER_BOMB_DROP_CHANCE / (
+            1 + state.helicopter_bombs_dropped
+        )
         drop_bomb = jnp.logical_and(
             jnp.logical_and(chance, lucky),
             jnp.logical_not(heli_bomb_active),
+        )
+        bomb_timer = jnp.where(
+            chance,
+            jnp.array(self.consts.HELICOPTER_BOMB_RETRY_FRAMES, dtype=jnp.int32),
+            bomb_timer,
         )
         ## Count used chances (not drops), forget once the heli is gone
         bombs_dropped = jnp.where(
@@ -1759,6 +1770,7 @@ class JaxJamesBond(
             helicopter_bomb_vx=heli_bomb_vx,
             helicopter_bomb_active=heli_bomb_active,
             helicopter_bombs_dropped=bombs_dropped,
+            helicopter_bomb_timer=bomb_timer,
             satellite_laser_x=laser_x.astype(jnp.int32),
             satellite_laser_y=laser_y.astype(jnp.int32),
             satellite_laser_active=laser_active,
