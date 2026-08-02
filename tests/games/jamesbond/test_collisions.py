@@ -89,8 +89,12 @@ def test_no_score_while_bullet_misses(env):
     assert int(state.score) == 0
 
 
-def test_bullet_passes_through_satellite(env):
-    """Original behavior: the bullet ignores satellites entirely."""
+def test_bullet_destroys_satellite(env):
+    """The manual's scoring: shooting the satellite pays the enemy score.
+
+    The round is spent on the hit and the satellite leaves the screen
+    until its respawn breather runs out.
+    """
 
     _, state = env.reset(jax.random.PRNGKey(0))
     state = _clean_state(env, state)
@@ -104,9 +108,9 @@ def test_bullet_passes_through_satellite(env):
         player_bullet_y=jnp.array(106),
     )
     _, state, _, _, info = env.step(state, jnp.array(NOOP))
-    assert bool(state.satellite_active)
-    assert int(state.score) == 0
-    assert bool(state.player_bullet_active)
+    assert not bool(state.satellite_active)
+    assert int(state.score) == env.consts.SCORE_ENEMY
+    assert not bool(state.player_bullet_active)
 
 
 def test_bullet_passes_through_helicopter(env):

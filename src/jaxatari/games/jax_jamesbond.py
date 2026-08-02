@@ -2399,11 +2399,63 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
+        state = self._resolve_bullet_satellite_collisions(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_scuba_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
         return state
+
+    def _resolve_bullet_satellite_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Shooting down the satellite pays the manual's enemy score.
+
+        Either shot destroys it; the round is spent on the hit and the
+        satellite re-enters later through its normal respawn breather.
+        (Note: ALE intercept scans in the measured scenes showed bullets
+        passing through without reward -- this follows the manual's
+        scoring table instead, per the project's call.)
+        """
+
+        def shot_overlap(bx, by):
+            return _aabb_overlap(
+                bx, by,
+                self.consts.BULLET_WIDTH,
+                self.consts.BULLET_HEIGHT,
+                state.satellite_x,
+                state.satellite_y,
+                self.consts.SATELLITE_COLLISION_WIDTH,
+                self.consts.SATELLITE_COLLISION_HEIGHT,
+            )
+
+        air_hit = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, state.player_bullet_active),
+            shot_overlap(state.player_bullet_x, state.player_bullet_y),
+        )
+        water_hit = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, state.player_wbullet_active),
+            shot_overlap(state.player_wbullet_x, state.player_wbullet_y),
+        )
+        hit = jnp.logical_or(air_hit, water_hit)
+
+        def park(active, v):
+            return jnp.where(active, v, -1)
+
+        player_bullet_active = jnp.logical_and(state.player_bullet_active, ~air_hit)
+        player_wbullet_active = jnp.logical_and(state.player_wbullet_active, ~water_hit)
+
+        return state.replace(
+            satellite_active=jnp.logical_and(state.satellite_active, ~hit),
+            score=state.score + hit.astype(jnp.int32) * self.consts.SCORE_ENEMY,
+            hit_enemy=jnp.logical_or(state.hit_enemy, hit),
+            player_bullet_active=player_bullet_active,
+            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
+            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
+            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
+            player_wbullet_active=player_wbullet_active,
+            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
+            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
+            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+        )
 
     def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
         """Second water scene contacts.
@@ -2772,11 +2824,12 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
-        ## Both water scenes have a gray sky; it goes under the stars so
+        ## Both water scenes have a gray sky covering the measured rows
+        ## 29-120, meeting the water at 121; it goes under the stars so
         ## the stars still twinkle on it like in the real scenes
         raster = jax.lax.cond(
             state.stage >= 1,
-            lambda r: self.jr.render_at_clipped(r, 4, 28, self.SHAPE_MASKS['water_sky']),
+            lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['water_sky']),
             lambda r: r,
             raster,
         )
@@ -2816,12 +2869,18 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_ground(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the static ground strip using the existing ground_unkempt sprite."""
+        """Draw the static ground strip using the existing ground_unkempt sprite.
+
+        The sprite's first row is the gray road top, which sits at row 124
+        in the real game -- BELOW the player, whose hull rides rows
+        119-122 with the wheels touching the road. Drawing it at 119 put
+        the road at roof height and sank the car into the ground.
+        """
 
         return self.jr.render_at_clipped(
             raster,
             4,    # x - matches GAME_AREA_MIN_X
-            119,  # y - matches GAME_AREA_MAX_Y / PLAYER_INIT_Y
+            123,  # y - road top just under the wheels, like the real rows
             self.SHAPE_MASKS['ground'],
         )
 
@@ -2834,11 +2893,13 @@ class JamesBondRenderer(JAXGameRenderer):
         sits at the bottom of the water body.
         """
 
-        ## The second water scene runs the same layout with darker water
+        ## The second water scene runs the same layout with darker water.
+        ## The water surface is row 121 in the real game: the boat's hull
+        ## (119-122) rides half above, half below the waterline.
         raster = jax.lax.cond(
             state.stage == 2,
-            lambda r: self.jr.render_at_clipped(r, 4, 119, self.SHAPE_MASKS['water_b']),
-            lambda r: self.jr.render_at_clipped(r, 4, 119, self.SHAPE_MASKS['water']),
+            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water_b']),
+            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water']),
             raster,
         )
         ## The seabed is a 160px repeating strip that scrolls left with the
@@ -2848,13 +2909,13 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self.jr.render_at_clipped(
             raster,
             4 - scroll,
-            156,  # y - silhouette rises from the bottom of the water band
+            158,  # y - measured seabed top row
             self.SHAPE_MASKS['seabed'],
         )
         return self.jr.render_at_clipped(
             raster,
             4 - scroll + 160,
-            156,
+            158,
             self.SHAPE_MASKS['seabed'],
         )
 
