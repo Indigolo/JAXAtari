@@ -68,10 +68,15 @@ def get_default_asset_config() -> tuple:
             ## columns deleted, which tiled a valley-less seabed.
             {'name': 'seabed', 'type': 'single', 'file': 'seabed_full.npy'},
             {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'}, ## solid 74,74,74 measured in ALE
-            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'}, ## laser splash explosion
+            ## The splash frogman's two poses, both pixel-exact extractions
+            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'},
+            {'name': 'splash_wide', 'type': 'single', 'file': 'explosion_2.npy'},
+            ## A bolt sinking past a living frogman is drawn in his colors
+            {'name': 'laser_green', 'type': 'single', 'file': 'laser_green.npy'},
             ## Second water scene: darker water and its roster, all cropped
             ## from real ALE frames of that scene
             {'name': 'water_b', 'type': 'single', 'file': 'water_b.npy'},
+            {'name': 'sky_flash', 'type': 'single', 'file': 'sky_flash.npy'}, ## whole sky flashes gray when the rocket bursts
             {'name': 'rocket', 'type': 'single', 'file': 'rocket.npy'},
             {'name': 'submarine', 'type': 'single', 'file': 'submarine.npy'},
             {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
@@ -287,11 +292,21 @@ class JamesBondConstants(struct.PyTreeNode):
     ## it ignites and launches skyward. The submarine cruises underwater
     ## and only threatens a diving boat; the two flyers cross the sky.
     SCORE_ROCKET: int = struct.field(pytree_node=False, default=200)
+    ## The rocket's full launch cycle was measured frame by frame: it
+    ## appears mid-screen already submerged (tip row ~140), floats a few
+    ## frames, climbs at exactly 1px/frame straight up (a single-frame
+    ## splash blip marks the waterline crossing), and EXPLODES with its
+    ## tip at row 61 into two red debris bars that linger in the sky,
+    ## plus a 1-2 frame full-sky gray flash. One rocket every 256 frames.
     ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
     ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
-    ROCKET_Y: int = struct.field(pytree_node=False, default=138) ## rests low in the water (measured ~y140-150 in ALE); a diving boat can ram it
-    ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=180) ## frames afloat before launch
-    ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
+    ROCKET_Y: int = struct.field(pytree_node=False, default=138) ## rests low in the water; a diving boat can ram it
+    ROCKET_SPAWN_X: int = struct.field(pytree_node=False, default=85) ## appears mid-screen, not at the edge
+    ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
+    ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
+    ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
+    DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120) ## red bars linger and drift
+    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=2) ## whole sky flashes gray on the burst
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
@@ -300,10 +315,16 @@ class JamesBondConstants(struct.PyTreeNode):
     WB_HELI_WIDTH: int = struct.field(pytree_node=False, default=4)
     WB_HELI_HEIGHT: int = struct.field(pytree_node=False, default=11)
     WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=320)
+    ## The "small red flyer" of the early survey turned out to be the
+    ## rocket's explosion debris (two stacked 4x2 red bars), not an enemy
+    ## of its own: it spawns where the rocket bursts and drifts harmlessly.
     WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
     WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
     WB_FLYER_HEIGHT: int = struct.field(pytree_node=False, default=5)
-    WB_FLYER_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=380)
+    ## The submarine occasionally fires a short underwater torpedo up-left
+    ## ((-2,-1) px/frame, dies before reaching the surface). Measured as
+    ## harmless in every probe -- pure theatre.
+    SUB_TORPEDO_PERIOD: int = struct.field(pytree_node=False, default=400)
 
     ## Water scene: the satellite stops using the kitchen timer and instead
     ## releases its laser when it passes directly above the player (measured:
@@ -419,7 +440,6 @@ class JamesBondState:
     scuba_active: chex.Array
     scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
     scuba_respawn_timer: chex.Array ## breather before the next diver enters
-    scuba_glow: chex.Array ## frames of irradiated shimmer after absorbing a laser splash
     ## Laser splash explosion: static in world space, rides the scroll
     splash_x: chex.Array
     splash_active: chex.Array
@@ -436,9 +456,14 @@ class JamesBondState:
     wb_heli_x: chex.Array
     wb_heli_active: chex.Array
     wb_heli_timer: chex.Array
+    ## Rocket explosion debris (the two red bars); timer is its age
     wb_flyer_x: chex.Array
     wb_flyer_active: chex.Array
     wb_flyer_timer: chex.Array
+    ## Submarine's harmless underwater torpedo
+    sub_torp_x: chex.Array
+    sub_torp_y: chex.Array
+    sub_torp_active: chex.Array
     stage_step: chex.Array ## frames spent inside the current stage
     collected_diamond: chex.Array
     hit_enemy: chex.Array
@@ -591,7 +616,6 @@ class JaxJamesBond(
             scuba_active=jnp.array(False, dtype=jnp.bool_),
             scuba_age=jnp.array(0, dtype=jnp.int32),
             scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
-            scuba_glow=jnp.array(0, dtype=jnp.int32),
             splash_x=jnp.array(-1, dtype=jnp.int32),
             splash_active=jnp.array(False, dtype=jnp.bool_),
             splash_age=jnp.array(0, dtype=jnp.int32),
@@ -609,6 +633,9 @@ class JaxJamesBond(
             wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
             wb_flyer_active=jnp.array(False, dtype=jnp.bool_),
             wb_flyer_timer=jnp.array(0, dtype=jnp.int32),
+            sub_torp_x=jnp.array(-1, dtype=jnp.int32),
+            sub_torp_y=jnp.array(-1, dtype=jnp.int32),
+            sub_torp_active=jnp.array(False, dtype=jnp.bool_),
             stage_step=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
@@ -694,6 +721,7 @@ class JaxJamesBond(
                 submarine_active=sweep(state.submarine_active, False),
                 wb_heli_active=sweep(state.wb_heli_active, False),
                 wb_flyer_active=sweep(state.wb_flyer_active, False),
+                sub_torp_active=sweep(state.sub_torp_active, False),
                 ## The pit resets to its measured post-death position
                 pit_x=sweep(state.pit_x, 124),
                 hit_cooldown=sweep(state.hit_cooldown, 0),
@@ -1836,7 +1864,6 @@ class JaxJamesBond(
             scuba_respawn_timer=clear(
                 state.scuba_respawn_timer, self.consts.SCUBA_RESPAWN_FRAMES
             ),
-            scuba_glow=clear(state.scuba_glow, 0),
             splash_active=clear(state.splash_active, False),
             splash_age=clear(state.splash_age, 0),
         )
@@ -1888,7 +1915,10 @@ class JaxJamesBond(
 
         # Second water scene roster (stage 2)
         in_water_b = state.stage == 2
-        ## Rocket: floats with the scroll, then ignites and climbs away
+        ## Rocket, measured cycle: floats submerged for a few frames, then
+        ## climbs straight up 1px/frame and bursts with its tip at the
+        ## measured explosion row -- leaving the red debris bars and a
+        ## short full-sky flash.
         rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
         rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
         next_rocket_x = jnp.where(
@@ -1901,9 +1931,12 @@ class JaxJamesBond(
             state.rocket_y - 1,
             state.rocket_y
         )
-        next_rocket_active = state.rocket_active & (
-            next_rocket_y > -self.consts.ROCKET_HEIGHT
-        ) & (next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH)
+        rocket_explodes = state.rocket_active & (
+            next_rocket_y <= self.consts.ROCKET_EXPLODE_Y
+        )
+        next_rocket_active = state.rocket_active & (~rocket_explodes) & (
+            next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
+        )
         ## Submarine: cruises left under water, a touch faster than the scroll
         next_submarine_x = jnp.where(
             state.submarine_active & (state.step_count % 3 == 0),
@@ -1913,7 +1946,19 @@ class JaxJamesBond(
         next_submarine_active = state.submarine_active & (
             next_submarine_x > self.consts.GAME_AREA_MIN_X - self.consts.SUBMARINE_WIDTH
         )
-        ## Sky flyers: drift left across the whole screen
+        ## Submarine torpedo: a short underwater dart, up-left at (-2,-1)
+        ## per frame, gone before it reaches the surface. Harmless theatre.
+        next_torp_x = jnp.where(state.sub_torp_active, state.sub_torp_x - 2, -1)
+        next_torp_y = jnp.where(state.sub_torp_active, state.sub_torp_y - 1, -1)
+        next_torp_active = state.sub_torp_active & (next_torp_y > 124)
+        fire_torp = (
+            in_water_b & next_submarine_active & (~next_torp_active)
+            & (state.step_count % self.consts.SUB_TORPEDO_PERIOD == 0)
+        )
+        next_torp_x = jnp.where(fire_torp, next_submarine_x + 3, next_torp_x)
+        next_torp_y = jnp.where(fire_torp, jnp.array(self.consts.SUBMARINE_Y - 2, dtype=jnp.int32), next_torp_y)
+        next_torp_active = next_torp_active | fire_torp
+        ## Pink helicopter: drifts left across the sky (drops nothing)
         next_wb_heli_x = jnp.where(
             state.wb_heli_active & (state.step_count % 2 == 0),
             state.wb_heli_x - 1,
@@ -1922,14 +1967,21 @@ class JaxJamesBond(
         next_wb_heli_active = state.wb_heli_active & (
             next_wb_heli_x > self.consts.GAME_AREA_MIN_X - self.consts.WB_HELI_WIDTH
         )
+        ## Rocket debris: the two red bars linger where the rocket burst,
+        ## drifting with the world until their clock runs out
+        debris_age = jnp.where(state.wb_flyer_active, state.wb_flyer_timer + 1, 0)
         next_wb_flyer_x = jnp.where(
-            state.wb_flyer_active & (state.step_count % 2 == 0),
+            state.wb_flyer_active & (state.step_count % 4 == 0),
             state.wb_flyer_x - 1,
             state.wb_flyer_x
         )
         next_wb_flyer_active = state.wb_flyer_active & (
-            next_wb_flyer_x > self.consts.GAME_AREA_MIN_X - self.consts.WB_FLYER_WIDTH
+            debris_age < self.consts.DEBRIS_LIFETIME_FRAMES
         )
+        ## The burst hands over: rocket out, debris in at the burst column
+        next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
+        next_wb_flyer_x = jnp.where(rocket_explodes, next_rocket_x + 2, next_wb_flyer_x)
+        debris_age = jnp.where(rocket_explodes, 0, debris_age)
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -2022,10 +2074,12 @@ class JaxJamesBond(
             spawn = in_water_b & (~active) & (next_timer == 0)
             return spawn, next_timer
 
+        ## The rocket appears mid-screen already submerged (measured x~85),
+        ## on its 256-frame cycle: ~85 frames of life + this breather.
         spawn_rocket, rocket_timer = waterb_spawner(
             next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
         next_rocket_active = next_rocket_active | spawn_rocket
-        next_rocket_x = jnp.where(spawn_rocket, self.consts.OBJECT_SPAWN_X_FAR, next_rocket_x)
+        next_rocket_x = jnp.where(spawn_rocket, self.consts.ROCKET_SPAWN_X, next_rocket_x)
         next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y)
         rocket_age = jnp.where(spawn_rocket, 0, rocket_age)
 
@@ -2039,10 +2093,9 @@ class JaxJamesBond(
         next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
         next_wb_heli_x = jnp.where(spawn_wb_heli, self.consts.OBJECT_SPAWN_X_FAR, next_wb_heli_x)
 
-        spawn_wb_flyer, wb_flyer_timer = waterb_spawner(
-            next_wb_flyer_active, state.wb_flyer_timer, self.consts.WB_FLYER_RESPAWN_FRAMES)
-        next_wb_flyer_active = next_wb_flyer_active | spawn_wb_flyer
-        next_wb_flyer_x = jnp.where(spawn_wb_flyer, self.consts.OBJECT_SPAWN_X_FAR, next_wb_flyer_x)
+        ## The debris has no spawner of its own: it is born where the
+        ## rocket bursts (handled above with the rocket lifecycle).
+        wb_flyer_timer = debris_age
 
         ## Scuba diver: water only, one at a time, entering from the right
         ## edge with a breather between divers.
@@ -2175,6 +2228,9 @@ class JaxJamesBond(
             wb_flyer_x=next_wb_flyer_x,
             wb_flyer_active=next_wb_flyer_active,
             wb_flyer_timer=wb_flyer_timer,
+            sub_torp_x=next_torp_x,
+            sub_torp_y=next_torp_y,
+            sub_torp_active=next_torp_active,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -2217,29 +2273,27 @@ class JaxJamesBond(
         )
         laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < laser_floor)
 
-        ## Splash detonation, measured in ALE: in the water scene the spent
-        ## bolt leaves a green surface hazard at the impact column, riding
-        ## the world scroll (its aging and drift live in _update_objects).
-        ## Only one creature owns the splash at a time: while the scuba
-        ## diver is under water, the bolt spawns nothing new -- the diver
-        ## absorbs the hit instead and shimmers irradiated for a while.
+        ## Splash detonation, measured frame-exact in ALE: the spent bolt
+        ## becomes the green frogman at the impact column (narrow pose the
+        ## first frame), riding the world scroll for exactly 120 frames.
+        ## Only one frogman exists at a time: a bolt landing while one is
+        ## alive spawns nothing new -- instead the bolt visibly sinks
+        ## recolored radioactive-green (see the renderer) and the living
+        ## frogman's despawn clock RESTARTS, buying him another full life.
         detonate = jnp.logical_and(
             jnp.logical_and(state.satellite_laser_active, laser_y >= laser_floor),
             state.stage == 1,
         )
-        spawn_splash = jnp.logical_and(detonate, jnp.logical_not(state.scuba_active))
-        irradiate = jnp.logical_and(detonate, state.scuba_active)
+        spawn_splash = jnp.logical_and(detonate, jnp.logical_not(state.splash_active))
+        refresh_splash = jnp.logical_and(detonate, state.splash_active)
         splash_x = jnp.where(
             spawn_splash,
             laser_x, ## the frogman surfaces at [laser_x, laser_x+19], not centered
             state.splash_x,
         )
         splash_active = jnp.logical_or(state.splash_active, spawn_splash)
-        splash_age = jnp.where(spawn_splash, 0, state.splash_age)
-        scuba_glow = jnp.where(
-            irradiate,
-            jnp.array(self.consts.SPLASH_LIFETIME_FRAMES, dtype=jnp.int32),
-            jnp.maximum(state.scuba_glow - 1, 0),
+        splash_age = jnp.where(
+            jnp.logical_or(spawn_splash, refresh_splash), 0, state.splash_age
         )
 
         ## 2. Helicopter drop. Measured against the ROM: the trigger is the
@@ -2382,7 +2436,6 @@ class JaxJamesBond(
             splash_x=splash_x.astype(jnp.int32),
             splash_active=splash_active,
             splash_age=splash_age,
-            scuba_glow=scuba_glow,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
@@ -2500,13 +2553,10 @@ class JaxJamesBond(
             touch(state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
                   self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT),
         )
-        flyer_hit = jnp.logical_and(
-            state.wb_flyer_active,
-            touch(state.wb_flyer_x, jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
-                  self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT),
-        )
+        ## The red bars are rocket debris drifting far above the jump apex:
+        ## harmless wreckage, no collision.
 
-        any_hit = rocket_hit | submarine_hit | heli_hit | flyer_hit
+        any_hit = rocket_hit | submarine_hit | heli_hit
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(any_hit, can_take_damage)
 
@@ -2862,6 +2912,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_waterb(raster, state)
 
         raster = self._render_bullets(raster, state)
+        raster = self._render_sinking_bolt(raster, state)
 
         ## Render life counter: the HUD shows RESERVE lives (max 3 icons),
         ## not the life currently being played, matching the real game
@@ -2931,13 +2982,12 @@ class JamesBondRenderer(JAXGameRenderer):
     def _render_scuba(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the scuba diver, alternating his two swim frames.
 
-        The real diver switches frames every 15 frames (30-frame cycle).
-        After absorbing a laser splash he shimmers: the frames flip every
-        other frame while the irradiation lasts.
+        The real diver switches frames every 15 frames (30-frame cycle)
+        and, measured frame by frame, never changes appearance -- not even
+        when a laser bolt lands next to him.
         """
 
-        cadence = jnp.where(state.scuba_glow > 0, 2, 15)
-        sprite_idx = jnp.where((state.step_count // cadence) % 2 == 0, 0, 1)
+        sprite_idx = jnp.where((state.step_count // 15) % 2 == 0, 0, 1)
 
         def draw_fn(r):
             return self.jr.render_at_clipped(
@@ -2950,17 +3000,57 @@ class JamesBondRenderer(JAXGameRenderer):
         return jax.lax.cond(state.scuba_active, draw_fn, lambda r: r, raster)
 
     def _render_splash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the laser splash explosion straddling the water surface."""
+        """Draw the splash frogman with his measured two-pose animation.
+
+        Frame-exact from ALE: the narrow pose shows for exactly 1 frame at
+        spawn, then strict 7-frame phases alternate starting with the wide
+        pose (which reaches 4px further left and carries the yellow
+        under-glow rows). Green is visible every single frame -- only the
+        under-glow toggles with the wide phase.
+        """
+
+        narrow = ((state.splash_age + 6) // 7) % 2 == 0
+
+        def draw_fn(r):
+            return jax.lax.cond(
+                narrow,
+                lambda rr: self.jr.render_at_clipped(
+                    rr, state.splash_x, self.consts.SPLASH_Y,
+                    self.SHAPE_MASKS['splash'],
+                ),
+                lambda rr: self.jr.render_at_clipped(
+                    rr, state.splash_x - 4, self.consts.SPLASH_Y,
+                    self.SHAPE_MASKS['splash_wide'],
+                ),
+                r,
+            )
+
+        return jax.lax.cond(state.splash_active, draw_fn, lambda r: r, raster)
+
+    def _render_sinking_bolt(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """A bolt landing while the frogman lives sinks radioactive-green.
+
+        Measured: no second frogman spawns; the bar keeps falling under the
+        waterline drawn in the frogman's green instead of yellow.
+        """
+
+        submerged = jnp.logical_and(
+            jnp.logical_and(state.stage == 1, state.splash_active),
+            jnp.logical_and(
+                state.satellite_laser_active,
+                state.satellite_laser_y > 119,
+            ),
+        )
 
         def draw_fn(r):
             return self.jr.render_at_clipped(
                 r,
-                state.splash_x,
-                self.consts.SPLASH_Y,
-                self.SHAPE_MASKS['splash'],
+                state.satellite_laser_x,
+                state.satellite_laser_y,
+                self.SHAPE_MASKS['laser_green'],
             )
 
-        return jax.lax.cond(state.splash_active, draw_fn, lambda r: r, raster)
+        return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
 
     def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the second water scene roster."""
@@ -2973,13 +3063,26 @@ class JamesBondRenderer(JAXGameRenderer):
                 raster,
             )
 
+        ## The rocket burst flashes the whole sky gray for a frame or two
+        raster = one(
+            raster,
+            jnp.logical_and(
+                state.wb_flyer_active,
+                state.wb_flyer_timer < self.consts.SKY_FLASH_FRAMES,
+            ),
+            jnp.array(8, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
+        )
         raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
         raster = one(raster, state.submarine_active, state.submarine_x,
                      jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32), 'submarine')
         raster = one(raster, state.wb_heli_active, state.wb_heli_x,
                      jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32), 'heli_pink')
+        ## Rocket debris: the two red bars linger where it burst
         raster = one(raster, state.wb_flyer_active, state.wb_flyer_x,
                      jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32), 'flyer_red')
+        ## Submarine torpedo: short underwater dart
+        raster = one(raster, state.sub_torp_active, state.sub_torp_x,
+                     state.sub_torp_y, 'bullet')
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:

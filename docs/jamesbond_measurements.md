@@ -94,3 +94,28 @@ the pink helicopter (y57) and small red flyer (y61) crossing the sky.
 
 The raw measurement reports, per-frame CSV traces and evidence frames live in
 the session scratchpad (`reports/*.md`) if deeper numbers are ever needed.
+
+## Addendum: second measurement round (frame-exact probes)
+
+- **"Satellite fires two shots" — refuted.** 3,162 frames, 9 passes, forced
+  RAM probes: one downward laser max, never anything above its body. The
+  illusion: the helicopter's dashed exhaust trail above the satellite while
+  a laser falls below, the orange pod permanently hanging under its body,
+  and the helicopter bomb wearing the satellite's colors (shared sprite
+  slot) while crossing its rows.
+- **Splash frogman animation**: narrow pose (explosion_1) for exactly 1
+  frame, then strict 7-frame phases alternating starting wide
+  (explosion_2, anchored 4px left, carrying the yellow under-glow rows).
+  120 frames exactly, world-fixed, instant removal. Never blinks.
+- **The "radioactive bolt"**: a bolt landing while a frogman lives spawns
+  nothing new — it sinks below the waterline recolored green, and the
+  living frogman's despawn clock restarts (life extended to landing+120).
+  The deep scuba diver is visibly unaffected by landings.
+- **Water-B rocket cycle (256 frames)**: floats submerged (tip ~y140),
+  climbs exactly 1px/frame, single-frame splash blip at the waterline,
+  explodes at tip y61 into two red debris bars (the "red flyer" of the
+  first survey — not an enemy) plus a 1-2 frame full-sky gray flash.
+- **Submarine torpedo**: previously undocumented — a short (-2,-1)/frame
+  underwater dart from the submarine, dies before the surface, harmless
+  in all 40 probe branches.
+- Helicopter bombs landing in water spawn nothing at all.
