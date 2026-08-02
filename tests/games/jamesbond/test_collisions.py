@@ -130,17 +130,23 @@ def test_bullet_passes_through_helicopter(env):
 
 
 def test_helicopter_drops_bomb(env):
-    """The first bomb releases when the heli closes to RANGE_FAR of the player."""
+    """The first bomb releases when the heli closes to RANGE_FAR of the player.
 
-    _, state = env.reset(jax.random.PRNGKey(0))
-    state = _clean_state(env, state)
-    far = env.consts.HELICOPTER_BOMB_RANGE_FAR
+    Uses a drop chance of 1.0 so the coin flip can't make the test flaky.
+    """
+
+    from jaxatari.games.jax_jamesbond import JamesBondConstants
+
+    sure_env = JaxJamesBond(JamesBondConstants(HELICOPTER_BOMB_DROP_CHANCE=1.0))
+    _, state = sure_env.reset(jax.random.PRNGKey(0))
+    state = _clean_state(sure_env, state)
+    far = sure_env.consts.HELICOPTER_BOMB_RANGE_FAR
     state = state.replace(
         helicopter_active=jnp.array(True),
         helicopter_x=(state.player_x + far - 1).astype(jnp.int32),  # just in range
         helicopter_y=jnp.array(57),
     )
-    _, state, _, _, _ = env.step(state, jnp.array(NOOP))
+    _, state, _, _, _ = sure_env.step(state, jnp.array(NOOP))
     assert bool(state.helicopter_bomb_active)
     assert int(state.helicopter_bombs_dropped) == 1
 

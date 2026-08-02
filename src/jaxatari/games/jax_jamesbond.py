@@ -186,6 +186,12 @@ class JamesBondConstants(struct.PyTreeNode):
     ## treatment, talk to Indi before touching it.
     HELICOPTER_BOMB_RANGE_FAR: int = struct.field(pytree_node=False, default=31)
     HELICOPTER_BOMB_RANGE_NEAR: int = struct.field(pytree_node=False, default=14)
+    ## The real game doesn't take every chance, passes come with 0, 1 or 2
+    ## bombs and the picker looks like the ROM's internal random generator
+    ## (it's not position, speed or the missile slot, we tested all three).
+    ## So each range crossing is one chance that succeeds with this
+    ## probability. Rough estimate, tune when someone disassembles the ROM.
+    HELICOPTER_BOMB_DROP_CHANCE: float = struct.field(pytree_node=False, default=0.5)
     SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
 
@@ -1667,22 +1673,32 @@ class JaxJamesBond(
         ## happen while the heli is basically on top of the player or already
         ## past, which is why bombs also fall right diagonal in the real game.
         distance = state.helicopter_x - state.player_x
-        drop_far = jnp.logical_and(
+        chance_far = jnp.logical_and(
             state.helicopter_bombs_dropped == 0,
             distance <= self.consts.HELICOPTER_BOMB_RANGE_FAR,
         )
-        drop_near = jnp.logical_and(
+        chance_near = jnp.logical_and(
             state.helicopter_bombs_dropped == 1,
             distance <= self.consts.HELICOPTER_BOMB_RANGE_NEAR,
         )
+        ## One chance per range crossing. The chance is consumed either way,
+        ## the coin flip decides if a bomb actually comes out, that's how the
+        ## real game ends up with 0, 1 or 2 bombs per pass.
+        chance = jnp.logical_and(
+            state.helicopter_active, jnp.logical_or(chance_far, chance_near)
+        )
+        roll = jax.random.uniform(
+            jax.random.fold_in(state.key, state.helicopter_bombs_dropped)
+        )
+        lucky = roll < self.consts.HELICOPTER_BOMB_DROP_CHANCE
         drop_bomb = jnp.logical_and(
-            jnp.logical_and(state.helicopter_active, jnp.logical_or(drop_far, drop_near)),
+            jnp.logical_and(chance, lucky),
             jnp.logical_not(heli_bomb_active),
         )
-        ## Count this pass's drops, forget the count once the heli is gone
+        ## Count used chances (not drops), forget once the heli is gone
         bombs_dropped = jnp.where(
             state.helicopter_active,
-            state.helicopter_bombs_dropped + drop_bomb.astype(jnp.int32),
+            state.helicopter_bombs_dropped + chance.astype(jnp.int32),
             0,
         )
         heli_bomb_x = jnp.where(
