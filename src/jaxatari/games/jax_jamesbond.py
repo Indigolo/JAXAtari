@@ -44,7 +44,10 @@ def get_default_asset_config() -> tuple:
             },
             {
                 'name': 'helicopter_melee', 'type': 'group',
-                'files': ['helicopter_shot_1.npy', 'helicopter_shot_2.npy'] ## TODO: Add others
+                ## The searchlight sweep table indexes sprites 0..14, so the
+                ## whole extracted sequence has to be here (the group loader
+                ## pads the differing widths).
+                'files': [f'helicopter_shot_{i}.npy' for i in range(1, 17)]
             },
             {
                 'name': 'pit', 'type': 'group',
@@ -249,7 +252,10 @@ class JamesBondConstants(struct.PyTreeNode):
     SCUBA_HEIGHT: int = struct.field(pytree_node=False, default=20)
     SCUBA_SPAWN_X: int = struct.field(pytree_node=False, default=155) ## right screen edge
     SCUBA_SPAWN_Y: int = struct.field(pytree_node=False, default=129) ## body below the surface row (ALE 131, our rows sit 2 higher)
-    SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333) ## two clean episodes, 333 frames each
+    ## The deep swimmer's own clock (both clean tracked episodes of the
+    ## 7x20 vertical diver ran 333 frames); the ~120 frame figure floating
+    ## around belongs to the surface splash creature, not to him.
+    SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333)
     SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
     ## The laser bolt splashes THROUGH the surface: it keeps falling under
     ## water and detonates into a static green surface explosion that
@@ -402,6 +408,7 @@ class JamesBondState:
     scuba_active: chex.Array
     scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
     scuba_respawn_timer: chex.Array ## breather before the next diver enters
+    scuba_glow: chex.Array ## frames of irradiated shimmer after absorbing a laser splash
     ## Laser splash explosion: static in world space, rides the scroll
     splash_x: chex.Array
     splash_active: chex.Array
@@ -569,6 +576,7 @@ class JaxJamesBond(
             scuba_active=jnp.array(False, dtype=jnp.bool_),
             scuba_age=jnp.array(0, dtype=jnp.int32),
             scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
+            scuba_glow=jnp.array(0, dtype=jnp.int32),
             splash_x=jnp.array(-1, dtype=jnp.int32),
             splash_active=jnp.array(False, dtype=jnp.bool_),
             splash_age=jnp.array(0, dtype=jnp.int32),
@@ -1791,6 +1799,7 @@ class JaxJamesBond(
             scuba_respawn_timer=clear(
                 state.scuba_respawn_timer, self.consts.SCUBA_RESPAWN_FRAMES
             ),
+            scuba_glow=clear(state.scuba_glow, 0),
             splash_active=clear(state.splash_active, False),
             splash_age=clear(state.splash_age, 0),
         )
@@ -2172,20 +2181,29 @@ class JaxJamesBond(
         laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < laser_floor)
 
         ## Splash detonation, measured in ALE: in the water scene the spent
-        ## bolt leaves a static green surface explosion at the impact
-        ## column. It rides the world scroll and stays deadly for a while
-        ## (its aging and drift live in _update_objects).
+        ## bolt leaves a green surface hazard at the impact column, riding
+        ## the world scroll (its aging and drift live in _update_objects).
+        ## Only one creature owns the splash at a time: while the scuba
+        ## diver is under water, the bolt spawns nothing new -- the diver
+        ## absorbs the hit instead and shimmers irradiated for a while.
         detonate = jnp.logical_and(
             jnp.logical_and(state.satellite_laser_active, laser_y >= laser_floor),
             state.stage == 1,
         )
+        spawn_splash = jnp.logical_and(detonate, jnp.logical_not(state.scuba_active))
+        irradiate = jnp.logical_and(detonate, state.scuba_active)
         splash_x = jnp.where(
-            detonate,
+            spawn_splash,
             laser_x, ## the frogman surfaces at [laser_x, laser_x+19], not centered
             state.splash_x,
         )
-        splash_active = jnp.logical_or(state.splash_active, detonate)
-        splash_age = jnp.where(detonate, 0, state.splash_age)
+        splash_active = jnp.logical_or(state.splash_active, spawn_splash)
+        splash_age = jnp.where(spawn_splash, 0, state.splash_age)
+        scuba_glow = jnp.where(
+            irradiate,
+            jnp.array(self.consts.SPLASH_LIFETIME_FRAMES, dtype=jnp.int32),
+            jnp.maximum(state.scuba_glow - 1, 0),
+        )
 
         ## 2. Helicopter drop. Measured against the ROM: the trigger is the
         ## distance to the player, not the searchlight. First bomb when the
@@ -2327,6 +2345,7 @@ class JaxJamesBond(
             splash_x=splash_x.astype(jnp.int32),
             splash_active=splash_active,
             splash_age=splash_age,
+            scuba_glow=scuba_glow,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
@@ -2756,6 +2775,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_diamond(raster, state)
         raster = self._render_pit(raster, state)
         raster = self._render_helicopter(raster, state)
+        raster = self._render_helicopter_melee(raster, state)
         raster = self._render_satellite(raster, state)
         raster = self._render_scuba(raster, state)
         raster = self._render_splash(raster, state)
@@ -2819,9 +2839,12 @@ class JamesBondRenderer(JAXGameRenderer):
         """Draw the scuba diver, alternating his two swim frames.
 
         The real diver switches frames every 15 frames (30-frame cycle).
+        After absorbing a laser splash he shimmers: the frames flip every
+        other frame while the irradiation lasts.
         """
 
-        sprite_idx = jnp.where((state.step_count // 15) % 2 == 0, 0, 1)
+        cadence = jnp.where(state.scuba_glow > 0, 2, 15)
+        sprite_idx = jnp.where((state.step_count // cadence) % 2 == 0, 0, 1)
 
         def draw_fn(r):
             return self.jr.render_at_clipped(
@@ -2869,7 +2892,10 @@ class JamesBondRenderer(JAXGameRenderer):
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the twinkling star field, alternating between the two frames."""
 
-        sprite_idx = jnp.where(state.step_count % 2 == 0, 0, 1)
+        ## The real stars fade through gray shades over many frames; a slow
+        ## alternation of the two extracted phases reads as twinkling
+        ## without making the sky vibrate.
+        sprite_idx = jnp.where((state.step_count // 8) % 2 == 0, 0, 1)
         return self.jr.render_at_clipped(
             raster,
             4,  # x - the sprites were re-extracted from ALE columns 4..156
@@ -2916,8 +2942,10 @@ class JamesBondRenderer(JAXGameRenderer):
     
     def _render_diamond(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
+        ## Sparkle alternation is a few frames per phase in the real game;
+        ## flipping every single frame made the whole gem vibrate.
         sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
+            (state.step_count // 4) % 2 == 0,
             0,
             1
         )
@@ -2930,12 +2958,14 @@ class JamesBondRenderer(JAXGameRenderer):
         )
 
         return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
-    
+
     def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the fire pit."""
 
+        ## The flame blinks in irregular multi-frame bursts in the real
+        ## game; a few frames per phase reads right without the strobe.
         sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
+            (state.step_count // 3) % 2 == 0,
             0,
             1
         )
@@ -2951,8 +2981,9 @@ class JamesBondRenderer(JAXGameRenderer):
     
     def _render_helicopter(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
+        ## Rotor frames alternate every 2-3 frames in the real game
         sprite_idx = jnp.where(
-            state.step_count % 2 == 0,
+            (state.step_count // 2) % 2 == 0,
             0,
             1
         )
@@ -2991,16 +3022,22 @@ class JamesBondRenderer(JAXGameRenderer):
                 )
         """
 
-        melee_idx = self.consts.HELICOPTER_MELEE_SPRITE_STEPS[state.helicopter_melee_step][0]
+        step = jnp.clip(
+            state.helicopter_melee_step,
+            0,
+            self.consts.HELICOPTER_MELEE_SPRITE_STEPS.shape[0] - 1,
+        )
+        melee_idx = self.consts.HELICOPTER_MELEE_SPRITE_STEPS[step][0]
 
         draw_fn = lambda r: self.jr.render_at_clipped(
             r,
-            state.helicopter_x + self.consts.HELICOPTER_MELEE_SPRITE_STEPS[state.helicopter_melee_step][1],
+            state.helicopter_x + self.consts.HELICOPTER_MELEE_SPRITE_STEPS[step][1],
             state.helicopter_y + 7,
-            self.SHAPE_MASKS['helicopter_melee'][melee_idx]
+            self.SHAPE_MASKS['helicopter_melee'][jnp.maximum(melee_idx, 0)]
         )
 
-        return jax.lax.cond(melee_idx != -1, draw_fn, lambda r: r, raster) ## TODO: Maybe add logical and with helicopter_active
+        visible = jnp.logical_and(state.helicopter_active, melee_idx != -1)
+        return jax.lax.cond(visible, draw_fn, lambda r: r, raster)
 
     def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
