@@ -66,6 +66,13 @@ def get_default_asset_config() -> tuple:
             {'name': 'seabed', 'type': 'single', 'file': 'seabed_full.npy'},
             {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'}, ## solid 74,74,74 measured in ALE
             {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'}, ## laser splash explosion
+            ## Second water scene: darker water and its roster, all cropped
+            ## from real ALE frames of that scene
+            {'name': 'water_b', 'type': 'single', 'file': 'water_b.npy'},
+            {'name': 'rocket', 'type': 'single', 'file': 'rocket.npy'},
+            {'name': 'submarine', 'type': 'single', 'file': 'submarine.npy'},
+            {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
+            {'name': 'flyer_red', 'type': 'single', 'file': 'flyer_red.npy'},
             {
                 'name': 'scuba', 'type': 'group',
                 'files': ['scuba_1.npy', 'scuba_2.npy']
@@ -256,13 +263,44 @@ class JamesBondConstants(struct.PyTreeNode):
     SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=112) ## airborne above this is safe
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132) ## bolt sinks this deep before detonating
 
+    ## Second water scene (after the dock bonus): darker water and a fresh
+    ## enemy roster, all sprites cropped from real ALE frames. The floating
+    ## rocket is the only scoring object (+200 for ramming it, though the
+    ## ram usually costs a life too); after idling on the surface a while
+    ## it ignites and launches skyward. The submarine cruises underwater
+    ## and only threatens a diving boat; the two flyers cross the sky.
+    SCORE_ROCKET: int = struct.field(pytree_node=False, default=200)
+    ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
+    ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
+    ROCKET_Y: int = struct.field(pytree_node=False, default=127) ## floats with its tip above the surface
+    ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=180) ## frames afloat before launch
+    ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
+    SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
+    SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
+    SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
+    SUBMARINE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=260)
+    WB_HELI_Y: int = struct.field(pytree_node=False, default=57)
+    WB_HELI_WIDTH: int = struct.field(pytree_node=False, default=4)
+    WB_HELI_HEIGHT: int = struct.field(pytree_node=False, default=11)
+    WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=320)
+    WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
+    WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
+    WB_FLYER_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    WB_FLYER_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=380)
+
     ## Water scene: the satellite stops using the kitchen timer and instead
     ## releases its laser when it passes directly above the player (measured:
     ## the drop column always matched the player column). Aim once, straight
     ## down, no homing -- same as the stage one laser fall.
-    SATELLITE_OVERHEAD_RANGE: int = struct.field(pytree_node=False, default=4) ## |sat belly - player center| trigger
-    SATELLITE_WATER_MAX_DROPS: int = struct.field(pytree_node=False, default=2) ## at most this many lasers per pass
-    SATELLITE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=65) ## measured gap between passes
+    ## Nailed with RAM-injection scans: at discrete check moments the
+    ## satellite drops iff the drop column is 1..95px to the RIGHT of the
+    ## player's hull -- it never fires while still left of the player, and
+    ## drops opportunistically any time its belly is ahead of the boat.
+    SATELLITE_DROP_AHEAD_MIN: int = struct.field(pytree_node=False, default=1)
+    SATELLITE_DROP_AHEAD_MAX: int = struct.field(pytree_node=False, default=95)
+    SATELLITE_CHECK_PERIOD: int = struct.field(pytree_node=False, default=30) ## check moments ~10-60f apart in ALE
+    SATELLITE_WATER_MAX_DROPS: int = struct.field(pytree_node=False, default=2) ## 1-2 per pass observed
+    SATELLITE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=46) ## measured 44-48 frame gap
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -368,6 +406,21 @@ class JamesBondState:
     splash_x: chex.Array
     splash_active: chex.Array
     splash_age: chex.Array
+    ## Second water scene roster
+    rocket_x: chex.Array
+    rocket_y: chex.Array
+    rocket_active: chex.Array
+    rocket_age: chex.Array ## ignites and launches after idling
+    rocket_timer: chex.Array
+    submarine_x: chex.Array
+    submarine_active: chex.Array
+    submarine_timer: chex.Array
+    wb_heli_x: chex.Array
+    wb_heli_active: chex.Array
+    wb_heli_timer: chex.Array
+    wb_flyer_x: chex.Array
+    wb_flyer_active: chex.Array
+    wb_flyer_timer: chex.Array
     stage_step: chex.Array ## frames spent inside the current stage
     collected_diamond: chex.Array
     hit_enemy: chex.Array
@@ -385,6 +438,8 @@ class JamesBondObservation:
     helicopters: ObjectObservation
     satellites: ObjectObservation
     scubas: ObjectObservation
+    ## rocket, submarine, pink helicopter, red flyer (second water scene)
+    waterb_enemies: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -517,6 +572,20 @@ class JaxJamesBond(
             splash_x=jnp.array(-1, dtype=jnp.int32),
             splash_active=jnp.array(False, dtype=jnp.bool_),
             splash_age=jnp.array(0, dtype=jnp.int32),
+            rocket_x=jnp.array(-1, dtype=jnp.int32),
+            rocket_y=jnp.array(-1, dtype=jnp.int32),
+            rocket_active=jnp.array(False, dtype=jnp.bool_),
+            rocket_age=jnp.array(0, dtype=jnp.int32),
+            rocket_timer=jnp.array(0, dtype=jnp.int32),
+            submarine_x=jnp.array(-1, dtype=jnp.int32),
+            submarine_active=jnp.array(False, dtype=jnp.bool_),
+            submarine_timer=jnp.array(0, dtype=jnp.int32),
+            wb_heli_x=jnp.array(-1, dtype=jnp.int32),
+            wb_heli_active=jnp.array(False, dtype=jnp.bool_),
+            wb_heli_timer=jnp.array(0, dtype=jnp.int32),
+            wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
+            wb_flyer_active=jnp.array(False, dtype=jnp.bool_),
+            wb_flyer_timer=jnp.array(0, dtype=jnp.int32),
             stage_step=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
@@ -584,6 +653,10 @@ class JaxJamesBond(
                 diamond_active=sweep(state.diamond_active, False),
                 scuba_active=sweep(state.scuba_active, False),
                 splash_active=sweep(state.splash_active, False),
+                rocket_active=sweep(state.rocket_active, False),
+                submarine_active=sweep(state.submarine_active, False),
+                wb_heli_active=sweep(state.wb_heli_active, False),
+                wb_flyer_active=sweep(state.wb_flyer_active, False),
                 ## The pit resets to its measured post-death position
                 pit_x=sweep(state.pit_x, 124),
                 hit_cooldown=sweep(state.hit_cooldown, 0),
@@ -632,6 +705,10 @@ class JaxJamesBond(
                 ## Water scene scuba diver, single object like the enemies
                 "scubas": spaces.get_object_space(
                     n=None, screen_size=screen_size
+                ),
+                ## rocket, submarine, pink helicopter, red flyer
+                "waterb_enemies": spaces.get_object_space(
+                    n=4, screen_size=screen_size
                 ),
                 ## player air bullet, player water bullet, helicopter bomb, satellite laser
                 "bullets": spaces.get_object_space(
@@ -708,6 +785,31 @@ class JaxJamesBond(
             self.consts.SCUBA_WIDTH,
             self.consts.SCUBA_HEIGHT,
         )
+        ## Second water scene roster in one fixed-slot group:
+        ## rocket, submarine, pink helicopter, red flyer. The shared box is
+        ## the largest of the four sprites.
+        waterb_enemies = self._object_group_observation(
+            jnp.stack([
+                state.rocket_x,
+                state.submarine_x,
+                state.wb_heli_x,
+                state.wb_flyer_x,
+            ]),
+            jnp.stack([
+                state.rocket_y,
+                jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
+                jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+                jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
+            ]),
+            jnp.stack([
+                state.rocket_active,
+                state.submarine_active,
+                state.wb_heli_active,
+                state.wb_flyer_active,
+            ]),
+            self.consts.SUBMARINE_WIDTH,
+            self.consts.SUBMARINE_HEIGHT,
+        )
         ## All four projectiles in one group, they share the same 1x4 sprite:
         ## player air bullet, player water bullet, helicopter bomb, satellite laser
         bullets = self._object_group_observation(
@@ -741,6 +843,7 @@ class JaxJamesBond(
             helicopters=helicopters,
             satellites=satellites,
             scubas=scubas,
+            waterb_enemies=waterb_enemies,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
@@ -1737,6 +1840,51 @@ class JaxJamesBond(
             splash_age < self.consts.SPLASH_LIFETIME_FRAMES
         )
 
+        # Second water scene roster (stage 2)
+        in_water_b = state.stage == 2
+        ## Rocket: floats with the scroll, then ignites and climbs away
+        rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
+        rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
+        next_rocket_x = jnp.where(
+            state.rocket_active & (~rocket_flying) & (state.step_count % 4 == 0),
+            state.rocket_x - 1,
+            state.rocket_x
+        )
+        next_rocket_y = jnp.where(
+            state.rocket_active & rocket_flying,
+            state.rocket_y - 1,
+            state.rocket_y
+        )
+        next_rocket_active = state.rocket_active & (
+            next_rocket_y > -self.consts.ROCKET_HEIGHT
+        ) & (next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH)
+        ## Submarine: cruises left under water, a touch faster than the scroll
+        next_submarine_x = jnp.where(
+            state.submarine_active & (state.step_count % 3 == 0),
+            state.submarine_x - 1,
+            state.submarine_x
+        )
+        next_submarine_active = state.submarine_active & (
+            next_submarine_x > self.consts.GAME_AREA_MIN_X - self.consts.SUBMARINE_WIDTH
+        )
+        ## Sky flyers: drift left across the whole screen
+        next_wb_heli_x = jnp.where(
+            state.wb_heli_active & (state.step_count % 2 == 0),
+            state.wb_heli_x - 1,
+            state.wb_heli_x
+        )
+        next_wb_heli_active = state.wb_heli_active & (
+            next_wb_heli_x > self.consts.GAME_AREA_MIN_X - self.consts.WB_HELI_WIDTH
+        )
+        next_wb_flyer_x = jnp.where(
+            state.wb_flyer_active & (state.step_count % 2 == 0),
+            state.wb_flyer_x - 1,
+            state.wb_flyer_x
+        )
+        next_wb_flyer_active = state.wb_flyer_active & (
+            next_wb_flyer_x > self.consts.GAME_AREA_MIN_X - self.consts.WB_FLYER_WIDTH
+        )
+
         # Enemies
         ## Helicopter enemy (Scroll left)
         ## 1. Determine which speed zone the helicopter is currently in, also affecting melee behavior of helicopter
@@ -1766,9 +1914,9 @@ class JaxJamesBond(
         )
         
         ## Satellite enemy (Scroll right)
-        ## Satellite enemy speed, here is 0.8 pixels per frame
+        ## Measured exactly: +1,+1,+1,+0 repeating = 3px every 4 frames
         next_satellite_x = jnp.where(
-            state.step_count % 5 != 4,
+            state.step_count % 4 != 3,
             state.satellite_x + 1,
             state.satellite_x
         )
@@ -1795,13 +1943,14 @@ class JaxJamesBond(
         on_land = state.stage == 0
         in_water = state.stage == 1
         row_57_empty = (~jnp.any(next_helicopter_active)) & (~jnp.any(next_diamond_active))
-        # Check whose turn it is to spawn. The helicopter and the pit are
-        # land-only; the diamond floats through the sky of every scene
-        # (measured at y60-64 on land and y62 over the water), so in the
-        # water scenes it spawns whenever the row is free instead of
-        # alternating with the helicopter.
-        spawn_diamond = row_57_empty & (state.spawn_diamond_next | ~on_land)
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & on_land
+        # Check whose turn it is to spawn. The pit is land-only; the
+        # diamond floats through the sky of every scene (measured at
+        # y60-64 on land and y62 over the water), and the red helicopter
+        # also patrols the first water scene, dropping the same bombs
+        # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
+        # per crossing). Only the second water scene retires it.
+        spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b)
         ## The satellite takes a measured ~65 frame breather between passes;
         ## the gap also lets its per-pass laser counter reset.
         satellite_respawn_timer = jnp.where(
@@ -1815,6 +1964,39 @@ class JaxJamesBond(
             (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1)
         )
         can_spawn_pit = (~next_pit_active) & on_land ## Only spawn when the previous pit left the screen
+
+        ## Second water scene spawners: each object enters from the right
+        ## on its own staggered breather so the roster stays mixed.
+        def waterb_spawner(active, timer, gap):
+            next_timer = jnp.where(
+                active | (~in_water_b),
+                jnp.array(gap, dtype=jnp.int32),
+                jnp.maximum(timer - 1, 0),
+            )
+            spawn = in_water_b & (~active) & (next_timer == 0)
+            return spawn, next_timer
+
+        spawn_rocket, rocket_timer = waterb_spawner(
+            next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
+        next_rocket_active = next_rocket_active | spawn_rocket
+        next_rocket_x = jnp.where(spawn_rocket, self.consts.OBJECT_SPAWN_X_FAR, next_rocket_x)
+        next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y)
+        rocket_age = jnp.where(spawn_rocket, 0, rocket_age)
+
+        spawn_submarine, submarine_timer = waterb_spawner(
+            next_submarine_active, state.submarine_timer, self.consts.SUBMARINE_RESPAWN_FRAMES)
+        next_submarine_active = next_submarine_active | spawn_submarine
+        next_submarine_x = jnp.where(spawn_submarine, self.consts.OBJECT_SPAWN_X_FAR, next_submarine_x)
+
+        spawn_wb_heli, wb_heli_timer = waterb_spawner(
+            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES)
+        next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
+        next_wb_heli_x = jnp.where(spawn_wb_heli, self.consts.OBJECT_SPAWN_X_FAR, next_wb_heli_x)
+
+        spawn_wb_flyer, wb_flyer_timer = waterb_spawner(
+            next_wb_flyer_active, state.wb_flyer_timer, self.consts.WB_FLYER_RESPAWN_FRAMES)
+        next_wb_flyer_active = next_wb_flyer_active | spawn_wb_flyer
+        next_wb_flyer_x = jnp.where(spawn_wb_flyer, self.consts.OBJECT_SPAWN_X_FAR, next_wb_flyer_x)
 
         ## Scuba diver: water only, one at a time, entering from the right
         ## edge with a breather between divers.
@@ -1933,6 +2115,20 @@ class JaxJamesBond(
             splash_x=next_splash_x,
             splash_active=next_splash_active,
             splash_age=splash_age,
+            rocket_x=next_rocket_x,
+            rocket_y=next_rocket_y,
+            rocket_active=next_rocket_active,
+            rocket_age=rocket_age,
+            rocket_timer=rocket_timer,
+            submarine_x=next_submarine_x,
+            submarine_active=next_submarine_active,
+            submarine_timer=submarine_timer,
+            wb_heli_x=next_wb_heli_x,
+            wb_heli_active=next_wb_heli_active,
+            wb_heli_timer=wb_heli_timer,
+            wb_flyer_x=next_wb_flyer_x,
+            wb_flyer_active=next_wb_flyer_active,
+            wb_flyer_timer=wb_flyer_timer,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -1985,7 +2181,7 @@ class JaxJamesBond(
         )
         splash_x = jnp.where(
             detonate,
-            laser_x - self.consts.SPLASH_WIDTH // 2, ## explosion centered on the impact column
+            laser_x, ## the frogman surfaces at [laser_x, laser_x+19], not centered
             state.splash_x,
         )
         splash_active = jnp.logical_or(state.splash_active, detonate)
@@ -2072,17 +2268,29 @@ class JaxJamesBond(
         )
         timer_drop = jnp.logical_and(state.satellite_active, laser_timer == 0)
 
+        ## Water rule, nailed with RAM-injection scans in ALE: at discrete
+        ## check moments the satellite fires iff the drop column sits 1..95
+        ## px AHEAD (right) of the player's hull -- never while still
+        ## behind it. With a parked player this looks like "drops when
+        ## overhead", but the window is wide open to the right.
         sat_belly = state.satellite_x + self.consts.SATELLITE_ENEMY_WIDTH // 2
-        player_center = state.player_x + self.consts.PLAYER_WIDTH // 2
-        overhead = jnp.abs(sat_belly - player_center) <= self.consts.SATELLITE_OVERHEAD_RANGE
-        overhead_drop = jnp.logical_and(
-            jnp.logical_and(state.satellite_active, overhead),
-            state.satellite_lasers_dropped < self.consts.SATELLITE_WATER_MAX_DROPS,
+        ahead = sat_belly - state.player_x
+        in_drop_window = jnp.logical_and(
+            ahead >= self.consts.SATELLITE_DROP_AHEAD_MIN,
+            ahead <= self.consts.SATELLITE_DROP_AHEAD_MAX,
+        )
+        check_moment = (state.step_count % self.consts.SATELLITE_CHECK_PERIOD) == 0
+        window_drop = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, check_moment),
+            jnp.logical_and(
+                in_drop_window,
+                state.satellite_lasers_dropped < self.consts.SATELLITE_WATER_MAX_DROPS,
+            ),
         )
 
         in_water = state.stage == 1
         drop_laser = jnp.logical_and(
-            jnp.where(in_water, overhead_drop, timer_drop),
+            jnp.where(in_water, window_drop, timer_drop),
             jnp.logical_not(laser_active),
         )
         laser_x = jnp.where(drop_laser, sat_belly, laser_x)
@@ -2147,7 +2355,71 @@ class JaxJamesBond(
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_scuba_player_collisions(state)
+        state = self._resolve_waterb_collisions(state)
         return state
+
+    def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
+        """Second water scene contacts.
+
+        Ramming the floating rocket is the scene's only score (+200), and
+        in the real game the ram usually costs a life as well -- both
+        effects fire here, the damage under the usual cooldown. The
+        submarine and the two flyers just hurt: the submarine can only
+        reach a diving boat, the flyers only a jumping one.
+        """
+
+        def touch(ox, oy, ow, oh):
+            return _aabb_overlap(
+                state.player_x,
+                state.player_y,
+                self.consts.PLAYER_COLLISION_WIDTH,
+                self.consts.PLAYER_COLLISION_HEIGHT,
+                ox, oy, ow, oh,
+            )
+
+        rocket_hit = jnp.logical_and(
+            state.rocket_active,
+            touch(state.rocket_x, state.rocket_y,
+                  self.consts.ROCKET_WIDTH, self.consts.ROCKET_HEIGHT),
+        )
+        submarine_hit = jnp.logical_and(
+            state.submarine_active,
+            touch(state.submarine_x, jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
+                  self.consts.SUBMARINE_WIDTH, self.consts.SUBMARINE_HEIGHT),
+        )
+        heli_hit = jnp.logical_and(
+            state.wb_heli_active,
+            touch(state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+                  self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT),
+        )
+        flyer_hit = jnp.logical_and(
+            state.wb_flyer_active,
+            touch(state.wb_flyer_x, jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
+                  self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT),
+        )
+
+        any_hit = rocket_hit | submarine_hit | heli_hit | flyer_hit
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(any_hit, can_take_damage)
+
+        return state.replace(
+            score=state.score + rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET,
+            hit_enemy=jnp.logical_or(state.hit_enemy, rocket_hit),
+            rocket_active=jnp.logical_and(state.rocket_active, ~rocket_hit),
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            death_timer=jnp.where(
+                took_damage,
+                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.death_timer,
+            ),
+        )
 
     def _resolve_scuba_player_collisions(self, state: JamesBondState) -> JamesBondState:
         """One life of damage from the two water hazards.
@@ -2174,12 +2446,11 @@ class JaxJamesBond(
         )
         diver_hit = jnp.logical_and(state.scuba_active, diver_overlap)
 
-        ## Splash: horizontal adjacency (inflated 1px) plus an altitude gate
-        splash_left = state.splash_x - 1
-        splash_right = state.splash_x + self.consts.SPLASH_WIDTH + 1
+        ## Splash: the measured kill window is boat_x in
+        ## [splash_x - 9, splash_x + 19], plus an altitude gate
         x_touch = jnp.logical_and(
-            state.player_x < splash_right,
-            state.player_x + self.consts.PLAYER_COLLISION_WIDTH > splash_left,
+            state.player_x >= state.splash_x - 9,
+            state.player_x <= state.splash_x + 19,
         )
         low_enough = state.player_y >= self.consts.SPLASH_SAFE_PLAYER_Y
         splash_hit = jnp.logical_and(
@@ -2303,9 +2574,14 @@ class JaxJamesBond(
         )
 
     def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """Collect active diamonds that overlap the player's bullet collision box."""
+        """Collect active diamonds that overlap a player shot.
 
-        overlaps = _aabb_overlap(
+        Both shots count: the land round and the water anti-air round fly
+        the same up-forward path, and shooting the floating gem is worth
+        +50 in every scene (verified in ALE on land and over the water).
+        """
+
+        air_overlap = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
             self.consts.BULLET_WIDTH,
@@ -2315,12 +2591,28 @@ class JaxJamesBond(
             self.consts.DIAMOND_COLLISION_WIDTH,
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
+        water_overlap = _aabb_overlap(
+            state.player_wbullet_x,
+            state.player_wbullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.diamond_x,
+            state.diamond_y,
+            self.consts.DIAMOND_COLLISION_WIDTH,
+            self.consts.DIAMOND_COLLISION_HEIGHT,
+        )
 
         ## Gate per diamond slot: only active diamonds can be hit, and only
-        ## while the bullet itself is active.
-        collected = jnp.logical_and(
-            jnp.logical_and(state.diamond_active, state.player_bullet_active),
-            overlaps,
+        ## while the respective shot itself is active.
+        collected = jnp.logical_or(
+            jnp.logical_and(
+                jnp.logical_and(state.diamond_active, state.player_bullet_active),
+                air_overlap,
+            ),
+            jnp.logical_and(
+                jnp.logical_and(state.diamond_active, state.player_wbullet_active),
+                water_overlap,
+            ),
         )
         collected_any = jnp.any(collected)
         collected_count = jnp.sum(collected.astype(jnp.int32))
@@ -2443,10 +2735,10 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
-        ## The water scene has a gray sky; it goes under the stars so the
-        ## stars still twinkle on it like in the real scene
+        ## Both water scenes have a gray sky; it goes under the stars so
+        ## the stars still twinkle on it like in the real scenes
         raster = jax.lax.cond(
-            state.stage == 1,
+            state.stage >= 1,
             lambda r: self.jr.render_at_clipped(r, 4, 28, self.SHAPE_MASKS['water_sky']),
             lambda r: r,
             raster,
@@ -2467,6 +2759,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_satellite(raster, state)
         raster = self._render_scuba(raster, state)
         raster = self._render_splash(raster, state)
+        raster = self._render_waterb(raster, state)
 
         raster = self._render_bullets(raster, state)
 
@@ -2498,11 +2791,12 @@ class JamesBondRenderer(JAXGameRenderer):
         sits at the bottom of the water body.
         """
 
-        raster = self.jr.render_at_clipped(
+        ## The second water scene runs the same layout with darker water
+        raster = jax.lax.cond(
+            state.stage == 2,
+            lambda r: self.jr.render_at_clipped(r, 4, 119, self.SHAPE_MASKS['water_b']),
+            lambda r: self.jr.render_at_clipped(r, 4, 119, self.SHAPE_MASKS['water']),
             raster,
-            4,    # x - matches GAME_AREA_MIN_X, same as the ground strip
-            119,  # y - surface at GAME_AREA_MAX_Y / PLAYER_INIT_Y
-            self.SHAPE_MASKS['water'],
         )
         ## The seabed is a 160px repeating strip that scrolls left with the
         ## world, 1px every 4th frame. Drawing the pattern twice, one strip
@@ -2551,6 +2845,26 @@ class JamesBondRenderer(JAXGameRenderer):
             )
 
         return jax.lax.cond(state.splash_active, draw_fn, lambda r: r, raster)
+
+    def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the second water scene roster."""
+
+        def one(raster, active, x, y, mask_name):
+            return jax.lax.cond(
+                active,
+                lambda r: self.jr.render_at_clipped(r, x, y, self.SHAPE_MASKS[mask_name]),
+                lambda r: r,
+                raster,
+            )
+
+        raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
+        raster = one(raster, state.submarine_active, state.submarine_x,
+                     jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32), 'submarine')
+        raster = one(raster, state.wb_heli_active, state.wb_heli_x,
+                     jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32), 'heli_pink')
+        raster = one(raster, state.wb_flyer_active, state.wb_flyer_x,
+                     jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32), 'flyer_red')
+        return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the twinkling star field, alternating between the two frames."""
