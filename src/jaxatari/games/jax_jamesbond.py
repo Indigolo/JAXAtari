@@ -241,6 +241,11 @@ class JamesBondConstants(struct.PyTreeNode):
     ## a 5000 point bonus; after it comes the second water scene (darker
     ## water, new enemy set) which never ended in a 22000 frame probe, so
     ## it is treated as endless here.
+    ## START_STAGE jumps a fresh game straight into a later scene for
+    ## playtesting (0 land, 1 first water, 2 second water). Settable
+    ## without code changes via the JB_START_STAGE environment variable:
+    ##   JB_START_STAGE=1 python scripts/play.py -g jamesbond
+    START_STAGE: int = struct.field(pytree_node=False, default=0)
     STAGE_ONE_LENGTH: int = struct.field(pytree_node=False, default=4454)
     STAGE_TWO_LENGTH: int = struct.field(pytree_node=False, default=4435)
     SCORE_STAGE_BONUS: int = struct.field(pytree_node=False, default=5000) ## boarding the dock after water-A
@@ -503,7 +508,11 @@ class JaxJamesBond(
     )
 
     def __init__(self, consts: JamesBondConstants = None):
-        consts = consts or JamesBondConstants()
+        if consts is None:
+            ## JB_START_STAGE lets playtesters jump straight into a later
+            ## scene through scripts/play.py without touching code
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
 
@@ -540,7 +549,7 @@ class JaxJamesBond(
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
-            stage=jnp.array(0, dtype=jnp.int32),
+            stage=jnp.array(self.consts.START_STAGE, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
             death_timer=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.array(0, dtype=jnp.int32),
@@ -2829,7 +2838,7 @@ class JamesBondRenderer(JAXGameRenderer):
         ## the stars still twinkle on it like in the real scenes
         raster = jax.lax.cond(
             state.stage >= 1,
-            lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['water_sky']),
+            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
             lambda r: r,
             raster,
         )
@@ -2879,7 +2888,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return self.jr.render_at_clipped(
             raster,
-            4,    # x - matches GAME_AREA_MIN_X
+            8,    # x - real playfield left edge (columns 0-7 stay black like ALE)
             123,  # y - road top just under the wheels, like the real rows
             self.SHAPE_MASKS['ground'],
         )
@@ -2898,8 +2907,8 @@ class JamesBondRenderer(JAXGameRenderer):
         ## (119-122) rides half above, half below the waterline.
         raster = jax.lax.cond(
             state.stage == 2,
-            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water_b']),
-            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water']),
+            lambda r: self.jr.render_at_clipped(r, 8, 121, self.SHAPE_MASKS['water_b']),
+            lambda r: self.jr.render_at_clipped(r, 8, 121, self.SHAPE_MASKS['water']),
             raster,
         )
         ## The seabed is a 160px repeating strip that scrolls left with the
@@ -2908,13 +2917,13 @@ class JamesBondRenderer(JAXGameRenderer):
         scroll = (state.step_count // 4) % 160
         raster = self.jr.render_at_clipped(
             raster,
-            4 - scroll,
+            8 - scroll,
             158,  # y - measured seabed top row
             self.SHAPE_MASKS['seabed'],
         )
         return self.jr.render_at_clipped(
             raster,
-            4 - scroll + 160,
+            8 - scroll + 160,
             158,
             self.SHAPE_MASKS['seabed'],
         )
