@@ -430,19 +430,19 @@ class JaxJamesBond(
         )
 
         return self._get_observation(state), state
-
+    
     @partial(jax.jit, static_argnums=(0,))
     def step(
         self, state: JamesBondState, action: chex.Array
     ) -> Tuple[JamesBondObservation, JamesBondState, chex.Array, chex.Array, JamesBondInfo]:
-        """Advance one placeholder frame and return the repo-standard tuple."""
+        """Advance one frame and return the repo-standard tuple."""
 
         atari_action = self._decode_action(action)
         previous_state = state
 
         state = state.replace(
             step_count=state.step_count + 1,
-            collected_diamond=jnp.array(False, dtype=jnp.bool_),
+            collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Needed?
             hit_enemy=jnp.array(False, dtype=jnp.bool_),
             hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
             fired_bullet=atari_action == Action.FIRE,
@@ -451,6 +451,7 @@ class JaxJamesBond(
         state = self._update_objects(state)
         state = self._update_enemy_bombs(state)
         state = self._check_collisions_placeholder(state)
+        state = self._stage_step(state) ## TODO: place above?
 
         _, next_key = jax.random.split(state.key)
         state = state.replace(key=next_key)
@@ -640,6 +641,22 @@ class JaxJamesBond(
         """Translate compact action-space indices to JAXAtariAction values."""
 
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
+
+    def _stage_step(
+        self, state: JamesBondState
+    ) -> JamesBondState:
+
+        lives_lost = self.consts.MAX_LIVES - state.lives
+
+        new_stage = jnp.where( ## TODO: add transition to stage 3
+            state.step_count > 3000 + lives_lost * 1000,
+            1,
+            0
+        )
+        
+        return state.replace(
+            stage = new_stage
+        )
 
     def step_player_stage_one( ## TODO: Switch to air logic?
         self, args
