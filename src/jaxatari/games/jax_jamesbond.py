@@ -1345,15 +1345,19 @@ class JaxJamesBond(
             )
 
             player_wbullet_x = jnp.where(
-                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
-                player_x,
-                jnp.where(player_wbullet_step < 8,
-                    player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][0],
-                    jnp.where(
-                        player_wbullet_step % 2 == 1,
-                        player_wbullet_x + 1,
-                        0
-                    )
+                jnp.logical_and(player_wbullet_active, player_wbullet_x == -1), 
+                player_x + 7,
+                jnp.where(
+                    player_wbullet_active,
+                    jnp.where(player_wbullet_step < 8,
+                        player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][0],
+                        jnp.where(
+                            player_wbullet_step % 2 == 1,
+                            player_wbullet_x + 1,
+                            player_wbullet_x
+                        )
+                    ),
+                    -1
                 )
             )
 
@@ -1361,13 +1365,17 @@ class JaxJamesBond(
                 jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
                 player_y - 1,
                 jnp.where(
-                    player_wbullet_step < 8,
-                    player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                    player_wbullet_active,
                     jnp.where(
-                        player_wbullet_step % 2 == 1,
-                        player_wbullet_x + 1,
-                        0
-                    )
+                        player_wbullet_step < 8,
+                        player_wbullet_y + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                        jnp.where(
+                            player_wbullet_step % 2 == 1,
+                            player_wbullet_y + 1,
+                            player_wbullet_y
+                        )
+                    ),
+                    -1
                 )
             )
 
@@ -1427,6 +1435,18 @@ class JaxJamesBond(
             bullet_function
         )
 
+        bullet_function = jnp.where(
+            jnp.logical_and(
+                fire_pressed,
+                jnp.logical_and(
+                    state.player_wbullet_step >= 1, ## TODO: Maybe more?
+                    ~state.player_bullet_active,
+                )
+            ),
+            3,
+            bullet_function
+        )
+
         bullet_state = jax.lax.switch(
             bullet_function,
             [
@@ -1437,7 +1457,6 @@ class JaxJamesBond(
             ],
             state
         )
-
 
         return state.replace(
             player_x = player_x,
@@ -1478,7 +1497,7 @@ class JaxJamesBond(
         return jax.lax.switch( ## Stage indexing starts with 0
             state.stage,
             [
-                self.step_player_stage_one,
+                self.step_player_stage_two,
                 self.step_player_stage_two,
                 self.step_player_stage_three_placeholder,
             ],
