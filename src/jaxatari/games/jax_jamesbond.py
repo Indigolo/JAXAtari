@@ -78,6 +78,7 @@ def get_default_asset_config() -> tuple:
             ## from real ALE frames of that scene
             {'name': 'water_b', 'type': 'single', 'file': 'water_b.npy'},
             {'name': 'sky_flash', 'type': 'single', 'file': 'sky_flash.npy'}, ## whole sky flashes gray when the rocket bursts
+            {'name': 'death_flash', 'type': 'single', 'file': 'death_flash.npy'}, ## the sky's one-frame flash on a water death
             {'name': 'rocket', 'type': 'single', 'file': 'rocket.npy'},
             {'name': 'submarine', 'type': 'single', 'file': 'submarine.npy'},
             {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
@@ -2899,6 +2900,18 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = jax.lax.cond(
             state.stage >= 1,
             lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
+            lambda r: r,
+            raster,
+        )
+        ## Measured: on the very first frame of a water-scene death the
+        ## whole sky flashes #6f6f6f (the death_timer sits at its full
+        ## value for exactly that one frame)
+        raster = jax.lax.cond(
+            jnp.logical_and(
+                state.stage >= 1,
+                state.death_timer == self.consts.DEATH_ANIMATION_FRAMES,
+            ),
+            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['death_flash']),
             lambda r: r,
             raster,
         )
