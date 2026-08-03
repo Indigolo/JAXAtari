@@ -34,8 +34,9 @@ def get_default_asset_config() -> tuple:
             {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Placeholder, extract the real background sprite
             {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
             {
-                'name': 'car', 'type': 'group', 
-                'files': ['car.npy', 'car_dead_1.npy', 'car_dead_2.npy'] ## TODO: maybe delete car_dead_3 sprite
+                'name': 'car', 'type': 'group',
+                ## All three recolors feed the death color-cycle
+                'files': ['car.npy', 'car_dead_1.npy', 'car_dead_2.npy', 'car_dead_3.npy']
             },
             {'name': 'satellite', 'type': 'single', 'file': 'satellite.npy'},
             {
@@ -185,10 +186,10 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1) ## TODO: which bullet?
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
-    ## Fire pit sprite size as loaded from fire_pit_*.npy.
-    ## TODO: The npy looks stored transposed (48x16); revisit with the sprite team.
+    ## Fire pit sprite size, re-extracted from real frames: the crater top
+    ## pokes 2px above the road and the ember tail reaches ~38 rows down.
     PIT_WIDTH: int = struct.field(pytree_node=False, default=16)
-    PIT_HEIGHT: int = struct.field(pytree_node=False, default=48)
+    PIT_HEIGHT: int = struct.field(pytree_node=False, default=40)
 
     # Collision boxes are kept a little smaller than the real sprite sizes so
     # near-misses do not register, matching how the original game feels.
@@ -2183,7 +2184,7 @@ class JaxJamesBond(
         )
         next_pit_y = jnp.where(
             can_spawn_pit,
-            122, ## TODO: Pit spawn height, will change if the number is wrong
+            119, ## sprite row 0 = two rows above the crater rim; crater top lands just over the road
             next_pit_y
         )
 
@@ -2323,9 +2324,14 @@ class JaxJamesBond(
         lucky = roll < self.consts.HELICOPTER_BOMB_DROP_CHANCE / (
             1 + state.helicopter_bombs_dropped
         )
+        ## The bomb and the satellite laser share one hardware sprite slot
+        ## in the real game: they were never airborne together in 3k+
+        ## measured frames, naturally or forced. Enforce the exclusivity.
         drop_bomb = jnp.logical_and(
             jnp.logical_and(chance, lucky),
-            jnp.logical_not(heli_bomb_active),
+            jnp.logical_not(
+                jnp.logical_or(heli_bomb_active, state.satellite_laser_active)
+            ),
         )
         bomb_timer = jnp.where(
             chance,
@@ -2400,7 +2406,9 @@ class JaxJamesBond(
         in_water = state.stage == 1
         drop_laser = jnp.logical_and(
             jnp.where(in_water, window_drop, timer_drop),
-            jnp.logical_not(laser_active),
+            ## One laser at a time, and never while the helicopter bomb is
+            ## airborne -- they share the single projectile slot.
+            jnp.logical_not(jnp.logical_or(laser_active, heli_bomb_active)),
         )
         laser_x = jnp.where(drop_laser, sat_belly, laser_x)
         laser_y = jnp.where(
@@ -2479,14 +2487,16 @@ class JaxJamesBond(
         """
 
         def shot_overlap(bx, by):
+            ## The full sprite box, not the inset player-contact box: a
+            ## round that visibly clips the satellite should count.
             return _aabb_overlap(
                 bx, by,
                 self.consts.BULLET_WIDTH,
                 self.consts.BULLET_HEIGHT,
                 state.satellite_x,
                 state.satellite_y,
-                self.consts.SATELLITE_COLLISION_WIDTH,
-                self.consts.SATELLITE_COLLISION_HEIGHT,
+                self.consts.SATELLITE_ENEMY_WIDTH,
+                self.consts.SATELLITE_ENEMY_HEIGHT,
             )
 
         air_hit = jnp.logical_and(
@@ -3118,21 +3128,28 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.draw_rects(raster, position, size, self.PLAY_AREA_ID)
 
     def _render_car(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the player, color-cycling through the recolors while dying.
+
+        The world clock freezes during the 59-frame death animation, so
+        the cycle is driven by death_timer (which keeps counting down);
+        the multiplier makes the recolor order look random like the real
+        sprite's per-frame color roll.
+        """
 
         sprite_idx = jnp.where(
-            state.hit_cooldown > 0,
+            state.death_timer > 0,
+            1 + (state.death_timer * 5) % 3,
             jnp.where(
-                state.step_count % 2 == 0,
-                1,
-                2
-            ),
-            0
+                state.hit_cooldown > 0,
+                jnp.where(state.step_count % 2 == 0, 1, 2),
+                0
+            )
         )
 
         return self.jr.render_at_clipped(
-            raster, 
-            state.player_x, 
-            state.player_y, 
+            raster,
+            state.player_x,
+            state.player_y,
             self.SHAPE_MASKS['car'][sprite_idx]
         )
     
