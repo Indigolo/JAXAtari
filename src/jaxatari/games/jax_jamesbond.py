@@ -538,7 +538,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -1654,28 +1654,36 @@ class JaxJamesBond(
                 False
             )
 
-            ## Measured in ALE: the water-scene round is a plain anti-air
-            ## shot. It leaves from 10px into the hull, 4px above it, and
-            ## climbs up-forward at +2 x / -2 y every frame until it flies
-            ## off screen -- fired afloat or submerged, same trajectory.
-            ## (The old launch-table cruise that dived back into the water
-            ## did not survive contact with the real game.)
             player_wbullet_x = jnp.where(
-                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1),
-                player_x + 10,
+                jnp.logical_and(player_wbullet_active, player_wbullet_x == -1), 
+                player_x + 7,
                 jnp.where(
                     player_wbullet_active,
-                    player_wbullet_x + 2,
+                    jnp.where(player_wbullet_step < 8,
+                        player_wbullet_x + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][0],
+                        jnp.where(
+                            player_wbullet_step % 2 == 1,
+                            player_wbullet_x + 1,
+                            player_wbullet_x
+                        )
+                    ),
                     -1
                 )
             )
 
             player_wbullet_y = jnp.where(
-                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1),
-                player_y - 4,
+                jnp.logical_and(player_wbullet_active, player_wbullet_y == -1), 
+                player_y - 1,
                 jnp.where(
                     player_wbullet_active,
-                    player_wbullet_y - 2,
+                    jnp.where(player_wbullet_step < 8,
+                        player_wbullet_y + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                        jnp.where(
+                            player_wbullet_step % 2 == 1,
+                            player_wbullet_y + 1,
+                            player_wbullet_y
+                        )
+                    ),
                     -1
                 )
             )
@@ -1691,25 +1699,6 @@ class JaxJamesBond(
                 False,
                 player_wbullet_active
             )
-
-            ## Gone once it climbs off the top or flies off the right edge
-            player_wbullet_active = jnp.where(
-                jnp.logical_or(
-                    player_wbullet_y < -4,
-                    player_wbullet_x > self.consts.SCREEN_WIDTH,
-                ),
-                False,
-                player_wbullet_active
-            )
-
-            ## Park everything the moment the shot dies. The dispatcher
-            ## skips this logic entirely while the shot is inactive, so a
-            ## stale position would sit here until the next FIRE press and
-            ## resurrect the old shot mid-air (the review reproduced up to
-            ## ~20 swallowed presses from one stale off-screen exit).
-            player_wbullet_x = jnp.where(player_wbullet_active, player_wbullet_x, -1)
-            player_wbullet_y = jnp.where(player_wbullet_active, player_wbullet_y, -1)
-            player_wbullet_step = jnp.where(player_wbullet_active, player_wbullet_step, -1)
 
             return state.replace(
                 player_wbullet_active = player_wbullet_active,
@@ -1752,6 +1741,18 @@ class JaxJamesBond(
                 1, ## Water bullet is always the first one shot
                 0
             ),
+            bullet_function
+        )
+
+        bullet_function = jnp.where(
+            jnp.logical_and(
+                fire_pressed,
+                jnp.logical_and(
+                    state.player_wbullet_step >= 8, ## TODO: Maybe more?
+                    ~state.player_bullet_active,
+                )
+            ),
+            3,
             bullet_function
         )
 
