@@ -203,8 +203,13 @@ class JamesBondConstants(struct.PyTreeNode):
     ## one rarer than the last (chance / (1 + drops so far)), which lands at
     ## roughly: one bomb common, two rarer, three much rarer, four rare.
     HELICOPTER_BOMB_DROP_CHANCE: float = struct.field(pytree_node=False, default=0.5)
-    SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=52) ## satellite drops a laser roughly every 52 frames
+    ## 75 lands on ~2 drops per full-screen pass like in ALE (52 gave 3-4)
+    SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=75)
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
+
+    ## GAME_AREA_MAX_X is only the player's hard stop; world objects use
+    ## the real screen edges like in ALE
+    OBJECT_EXIT_X: int = struct.field(pytree_node=False, default=159) ## rightward movers leave here
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -1566,14 +1571,15 @@ class JaxJamesBond(
         )
         
         ## Satellite enemy (Scroll right)
-        ## Satellite enemy speed, here is 0.8 pixels per frame
+        ## Measured in ALE: +1,+1,+1,+0 repeating = 3px every 4 frames
         next_satellite_x = jnp.where(
-            state.step_count % 5 != 4,
+            state.step_count % 4 != 3,
             state.satellite_x + 1,
             state.satellite_x
         )
         next_satellite_y = state.satellite_y
-        satellite_on_screen = next_satellite_x <= (self.consts.GAME_AREA_MAX_X)
+        ## It crosses the whole screen (~209 frame pass), not just the play area
+        satellite_on_screen = next_satellite_x <= (self.consts.OBJECT_EXIT_X)
         next_satellite_active = state.satellite_active & satellite_on_screen
 
         # Fire pit (Scroll left)
