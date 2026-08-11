@@ -232,6 +232,13 @@ class JamesBondConstants(struct.PyTreeNode):
     ## In the water the bolt sinks past the surface down to here (~y134-137 in ALE)
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132)
 
+    ## Water scene satellite: fires when its belly is this far to the RIGHT
+    ## of the player's hull, checked at discrete moments, never from behind
+    SATELLITE_DROP_AHEAD_MIN: int = struct.field(pytree_node=False, default=1)
+    SATELLITE_DROP_AHEAD_MAX: int = struct.field(pytree_node=False, default=95)
+    SATELLITE_CHECK_PERIOD: int = struct.field(pytree_node=False, default=30) ## check moments ~10-60f apart in ALE
+    SATELLITE_WATER_MAX_DROPS: int = struct.field(pytree_node=False, default=2) ## 1-2 per pass observed
+
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
     REWARD_ENEMY: float = struct.field(pytree_node=False, default=2.0)
@@ -323,6 +330,7 @@ class JamesBondState:
     satellite_laser_y: chex.Array
     satellite_laser_active: chex.Array
     satellite_laser_timer: chex.Array ## counts down to the next laser drop
+    satellite_lasers_dropped: chex.Array ## water scene: lasers used this pass
     satellite_respawn_timer: chex.Array ## breather between satellite passes
     ## Water scene scuba diver, single scalar object like the enemies
     scuba_x: chex.Array
@@ -472,6 +480,7 @@ class JaxJamesBond(
             satellite_laser_timer=jnp.array(
                 self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32
             ),
+            satellite_lasers_dropped=jnp.array(0, dtype=jnp.int32),
             ## Timer at 0 so the very first satellite appears right away
             satellite_respawn_timer=jnp.array(0, dtype=jnp.int32),
             ## The scuba diver starts parked off screen, water scene only
@@ -1922,24 +1931,41 @@ class JaxJamesBond(
         heli_bomb_vx = jnp.where(drop_bomb, aimed_vx, state.helicopter_bomb_vx)
         heli_bomb_active = jnp.logical_or(heli_bomb_active, drop_bomb)
 
-        ## 3. Satellite laser. Simple kitchen timer: counts down while a
-        ## satellite is on screen, drops from its belly at zero, rewinds.
-        ## Parked at full while no satellite is around, so every new pass
-        ## starts a fresh countdown.
+        ## 3. Satellite laser. Two triggers, one per scene:
+        ## - Land: the kitchen timer, parked at full while no satellite is
+        ##   around so every new pass starts a fresh countdown.
+        ## - Water: the timer is ignored, it fires by position instead.
         laser_timer = jnp.where(
             state.satellite_active,
             jnp.maximum(state.satellite_laser_timer - 1, 0),
             jnp.array(self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32),
         )
+        timer_drop = jnp.logical_and(state.satellite_active, laser_timer == 0)
+
+        ## Water rule from RAM-injection scans in ALE: at check moments the
+        ## satellite fires iff its belly is 1..95px ahead (right) of the
+        ## player, never from behind, at most 2 drops per pass
+        sat_belly = state.satellite_x + self.consts.SATELLITE_ENEMY_WIDTH // 2
+        ahead = sat_belly - state.player_x
+        in_drop_window = jnp.logical_and(
+            ahead >= self.consts.SATELLITE_DROP_AHEAD_MIN,
+            ahead <= self.consts.SATELLITE_DROP_AHEAD_MAX,
+        )
+        check_moment = (state.step_count % self.consts.SATELLITE_CHECK_PERIOD) == 0
+        window_drop = jnp.logical_and(
+            jnp.logical_and(state.satellite_active, check_moment),
+            jnp.logical_and(
+                in_drop_window,
+                state.satellite_lasers_dropped < self.consts.SATELLITE_WATER_MAX_DROPS,
+            ),
+        )
+
+        in_water = state.stage == 1
         drop_laser = jnp.logical_and(
-            jnp.logical_and(state.satellite_active, laser_timer == 0),
+            jnp.where(in_water, window_drop, timer_drop),
             jnp.logical_not(laser_active),
         )
-        laser_x = jnp.where(
-            drop_laser,
-            state.satellite_x + self.consts.SATELLITE_ENEMY_WIDTH // 2,
-            laser_x,
-        )
+        laser_x = jnp.where(drop_laser, sat_belly, laser_x)
         laser_y = jnp.where(
             drop_laser,
             state.satellite_y + self.consts.SATELLITE_ENEMY_HEIGHT,
@@ -1950,6 +1976,12 @@ class JaxJamesBond(
             drop_laser,
             jnp.array(self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32),
             laser_timer,
+        )
+        ## Count the drops used this pass, forget once the satellite is gone
+        lasers_dropped = jnp.where(
+            state.satellite_active,
+            state.satellite_lasers_dropped + drop_laser.astype(jnp.int32),
+            0,
         )
 
         return state.replace(
@@ -1963,6 +1995,7 @@ class JaxJamesBond(
             satellite_laser_y=laser_y.astype(jnp.int32),
             satellite_laser_active=laser_active,
             satellite_laser_timer=laser_timer,
+            satellite_lasers_dropped=lasers_dropped,
             splash_x=splash_x.astype(jnp.int32),
             splash_active=splash_active,
             splash_age=splash_age,
