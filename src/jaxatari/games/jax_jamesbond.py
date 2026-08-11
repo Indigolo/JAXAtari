@@ -1894,9 +1894,13 @@ class JaxJamesBond(
         lucky = roll < self.consts.HELICOPTER_BOMB_DROP_CHANCE / (
             1 + state.helicopter_bombs_dropped
         )
+        ## The bomb and the laser share one missile slot in the real game,
+        ## they were never airborne together in 3k+ measured frames
         drop_bomb = jnp.logical_and(
             jnp.logical_and(chance, lucky),
-            jnp.logical_not(heli_bomb_active),
+            jnp.logical_not(
+                jnp.logical_or(heli_bomb_active, state.satellite_laser_active)
+            ),
         )
         bomb_timer = jnp.where(
             chance,
@@ -1963,7 +1967,8 @@ class JaxJamesBond(
         in_water = state.stage == 1
         drop_laser = jnp.logical_and(
             jnp.where(in_water, window_drop, timer_drop),
-            jnp.logical_not(laser_active),
+            ## One laser at a time, and never while the bomb is airborne
+            jnp.logical_not(jnp.logical_or(laser_active, heli_bomb_active)),
         )
         laser_x = jnp.where(drop_laser, sat_belly, laser_x)
         laser_y = jnp.where(
