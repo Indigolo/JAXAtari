@@ -334,6 +334,8 @@ class JamesBondObservation:
     player_velocity: jnp.ndarray
     helicopters: ObjectObservation
     satellites: ObjectObservation
+    ## Field order must match the space Dict order
+    scubas: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -530,6 +532,9 @@ class JaxJamesBond(
                 "satellites": spaces.get_object_space(
                     n=None, screen_size=screen_size
                 ),
+                "scubas": spaces.get_object_space(
+                    n=None, screen_size=screen_size
+                ),
                 ## player air bullet, player water bullet, helicopter bomb, satellite laser
                 "bullets": spaces.get_object_space(
                     n=4, screen_size=screen_size
@@ -598,6 +603,13 @@ class JaxJamesBond(
             self.consts.SATELLITE_ENEMY_WIDTH,
             self.consts.SATELLITE_ENEMY_HEIGHT,
         )
+        scubas = self._object_group_observation(
+            state.scuba_x,
+            state.scuba_y,
+            state.scuba_active,
+            self.consts.SCUBA_WIDTH,
+            self.consts.SCUBA_HEIGHT,
+        )
         ## All four projectiles in one group, they share the same 1x4 sprite:
         ## player air bullet, player water bullet, helicopter bomb, satellite laser
         bullets = self._object_group_observation(
@@ -630,6 +642,7 @@ class JaxJamesBond(
             diamonds=diamonds,
             helicopters=helicopters,
             satellites=satellites,
+            scubas=scubas,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
