@@ -2031,7 +2031,53 @@ class JaxJamesBond(
         state = self._resolve_player_bullet_collisions(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
+        state = self._resolve_scuba_player_collisions(state)
         return state
+
+    def _resolve_scuba_player_collisions(self, state: JamesBondState) -> JamesBondState:
+        """One life of damage from the two water hazards, neither can be shot.
+
+        The diver's body sits below the surface, so a boat riding on top
+        floats past him. The splash figure straddles the surface and kills
+        on near contact; only a clearly airborne boat clears it.
+        """
+
+        diver_overlap = _aabb_overlap(
+            state.player_x,
+            state.player_y,
+            self.consts.PLAYER_COLLISION_WIDTH,
+            self.consts.PLAYER_COLLISION_HEIGHT,
+            state.scuba_x,
+            state.scuba_y,
+            self.consts.SCUBA_WIDTH,
+            self.consts.SCUBA_HEIGHT,
+        )
+        diver_hit = jnp.logical_and(state.scuba_active, diver_overlap)
+
+        ## Measured kill window: boat_x in [splash_x - 9, splash_x + 19]
+        x_touch = jnp.logical_and(
+            state.player_x >= state.splash_x - 9,
+            state.player_x <= state.splash_x + 19,
+        )
+        low_enough = state.player_y >= self.consts.SPLASH_SAFE_PLAYER_Y
+        splash_hit = jnp.logical_and(
+            state.splash_active, jnp.logical_and(x_touch, low_enough)
+        )
+
+        scuba_collision = jnp.logical_or(diver_hit, splash_hit)
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(scuba_collision, can_take_damage)
+
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+        )
 
     def _resolve_bullet_player_collisions(self, state: JamesBondState) -> JamesBondState:
         """One life of damage when the bomb or the laser hits the player.
