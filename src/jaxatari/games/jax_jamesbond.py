@@ -212,6 +212,15 @@ class JamesBondConstants(struct.PyTreeNode):
     ## the real screen edges like in ALE
     OBJECT_EXIT_X: int = struct.field(pytree_node=False, default=159) ## rightward movers leave here
 
+    ## Water scene scuba diver, measured in ALE on the test branch: a 7x20
+    ## vertical swimmer at a fixed depth, cannot be shot, deadly on touch
+    SCUBA_WIDTH: int = struct.field(pytree_node=False, default=7)
+    SCUBA_HEIGHT: int = struct.field(pytree_node=False, default=20)
+    SCUBA_SPAWN_X: int = struct.field(pytree_node=False, default=155) ## enters at the right screen edge
+    SCUBA_SPAWN_Y: int = struct.field(pytree_node=False, default=129) ## body below the surface row
+    SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333) ## vanishes on a clock, not at the edge
+    SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
+
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
     REWARD_ENEMY: float = struct.field(pytree_node=False, default=2.0)
@@ -304,6 +313,12 @@ class JamesBondState:
     satellite_laser_active: chex.Array
     satellite_laser_timer: chex.Array ## counts down to the next laser drop
     satellite_respawn_timer: chex.Array ## breather between satellite passes
+    ## Water scene scuba diver, single scalar object like the enemies
+    scuba_x: chex.Array
+    scuba_y: chex.Array
+    scuba_active: chex.Array
+    scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
+    scuba_respawn_timer: chex.Array ## breather before the next diver enters
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -442,6 +457,12 @@ class JaxJamesBond(
             ),
             ## Timer at 0 so the very first satellite appears right away
             satellite_respawn_timer=jnp.array(0, dtype=jnp.int32),
+            ## The scuba diver starts parked off screen, water scene only
+            scuba_x=jnp.array(-1, dtype=jnp.int32),
+            scuba_y=jnp.array(-1, dtype=jnp.int32),
+            scuba_active=jnp.array(False, dtype=jnp.bool_),
+            scuba_age=jnp.array(0, dtype=jnp.int32),
+            scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -1540,11 +1561,18 @@ class JaxJamesBond(
         next_diamond_active = state.diamond_active & diamond_on_screen
 
         # Scuba (Scroll left)
-        ## Scuba speed, here is 0.25 pixels per frame, will implement later
-        # next_scuba_x
-        # next_scuba_y
-        # scuba_on_screen
-        # next_scuba_active
+        ## Swims left 1px every 4th frame at a fixed depth, never chases.
+        ## No off-screen check: he vanishes mid-screen on his age clock
+        next_scuba_x = jnp.where(
+            state.step_count % 4 == 0,
+            state.scuba_x - 1,
+            state.scuba_x
+        )
+        next_scuba_y = state.scuba_y
+        scuba_age = jnp.where(state.scuba_active, state.scuba_age + 1, 0)
+        next_scuba_active = state.scuba_active & (
+            scuba_age < self.consts.SCUBA_LIFETIME_FRAMES
+        )
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -1600,6 +1628,8 @@ class JaxJamesBond(
         # === 2. Spawning logic ===
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
+        on_land = state.stage == 0
+        in_water = state.stage == 1
         row_57_empty = (~jnp.any(next_helicopter_active)) & (~jnp.any(next_diamond_active))
         # Check whose turn it is to spawn
         spawn_diamond = row_57_empty & state.spawn_diamond_next
@@ -1615,6 +1645,27 @@ class JaxJamesBond(
             (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1)
         )
         can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
+
+        ## Scuba diver: water only, one at a time, same parked-timer trick
+        ## as the satellite so the countdown starts once he is gone
+        scuba_respawn_timer = jnp.where(
+            next_scuba_active | on_land,
+            jnp.array(self.consts.SCUBA_RESPAWN_FRAMES, dtype=jnp.int32),
+            jnp.maximum(state.scuba_respawn_timer - 1, 0),
+        )
+        spawn_scuba = in_water & (~next_scuba_active) & (scuba_respawn_timer == 0)
+        next_scuba_active = next_scuba_active | spawn_scuba
+        next_scuba_x = jnp.where(
+            spawn_scuba,
+            jnp.array(self.consts.SCUBA_SPAWN_X, dtype=jnp.int32),
+            next_scuba_x
+        )
+        next_scuba_y = jnp.where(
+            spawn_scuba,
+            jnp.array(self.consts.SCUBA_SPAWN_Y, dtype=jnp.int32),
+            next_scuba_y
+        )
+        scuba_age = jnp.where(spawn_scuba, 0, scuba_age)
         # Flip the turn flag ONLY if a spawn is happening on this frame
         next_spawn_diamond_next = jnp.where(
             row_57_empty,
@@ -1634,12 +1685,6 @@ class JaxJamesBond(
             57, ## TODO: Diamond spawn height, will change if the number is wrong
             next_diamond_y
         )
-        # Scubas
-        # Apply new active status, position coordinates for spawned scubas
-        # next_scuba_active
-        # next_scuba_x
-        # next_scuba_y
-
         # Enemies
         ## Helicopter
         # Apply new active status, position coordinates for spawned helicopter enemies
@@ -1688,9 +1733,6 @@ class JaxJamesBond(
             diamond_x=next_diamond_x,
             diamond_y=next_diamond_y,
             diamond_active=next_diamond_active,
-            # scuba_x=next_scuba_x,
-            # scuba_y=next_scuba_y,
-            # scuba_active=next_scuba_active,
             helicopter_x=next_helicopter_x,
             helicopter_y=next_helicopter_y,
             helicopter_active=next_helicopter_active,
@@ -1702,7 +1744,12 @@ class JaxJamesBond(
             spawn_diamond_next=next_spawn_diamond_next,
             pit_x=next_pit_x,
             pit_y=next_pit_y,
-            pit_active=next_pit_active
+            pit_active=next_pit_active,
+            scuba_x=next_scuba_x,
+            scuba_y=next_scuba_y,
+            scuba_active=next_scuba_active,
+            scuba_age=scuba_age,
+            scuba_respawn_timer=scuba_respawn_timer,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -2105,6 +2152,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_pit(raster, state)
         raster = self._render_helicopter(raster, state)
         raster = self._render_satellite(raster, state)
+        raster = self._render_scuba(raster, state)
 
         raster = self._render_bullets(raster, state)
 
@@ -2273,7 +2321,25 @@ class JamesBondRenderer(JAXGameRenderer):
         )
 
         return jax.lax.cond(state.satellite_active, draw_fn, lambda r: r, raster)
-    
+
+    def _render_scuba(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the scuba diver, alternating his two swim frames.
+
+        He flips sprites every 15 frames and never changes appearance
+        beyond that, checked frame by frame in ALE.
+        """
+
+        sprite_idx = jnp.where((state.step_count // 15) % 2 == 0, 0, 1)
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.scuba_x,
+            state.scuba_y,
+            self.SHAPE_MASKS['scuba'][sprite_idx],
+        )
+
+        return jax.lax.cond(state.scuba_active, draw_fn, lambda r: r, raster)
+
     def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
         """Draw all projectiles, they share the same 1x4 bullet sprite."""
 
