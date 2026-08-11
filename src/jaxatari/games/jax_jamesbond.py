@@ -221,6 +221,9 @@ class JamesBondConstants(struct.PyTreeNode):
     SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333) ## vanishes on a clock, not at the edge
     SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
 
+    ## In the water the bolt sinks past the surface down to here (~y134-137 in ALE)
+    WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132)
+
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
     REWARD_ENEMY: float = struct.field(pytree_node=False, default=2.0)
@@ -1794,7 +1797,14 @@ class JaxJamesBond(
             state.satellite_laser_y + self.consts.SATELLITE_LASER_FALL_SPEED,
             -1,
         )
-        laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < ground)
+        ## On land the bolt vanishes at the ground line like before; in the
+        ## water it keeps sinking under the surface and dies deeper down
+        laser_floor = jnp.where(
+            state.stage == 1,
+            jnp.array(self.consts.WATER_LASER_FLOOR, dtype=jnp.int32),
+            jnp.array(ground, dtype=jnp.int32),
+        )
+        laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < laser_floor)
 
         ## 2. Helicopter drop. Measured against the ROM: the trigger is the
         ## distance to the player, not the searchlight. First bomb when the
