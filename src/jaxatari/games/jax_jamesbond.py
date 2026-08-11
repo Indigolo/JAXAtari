@@ -206,6 +206,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ## 75 lands on ~2 drops per full-screen pass like in ALE (52 gave 3-4)
     SATELLITE_LASER_DROP_PERIOD: int = struct.field(pytree_node=False, default=75)
     SATELLITE_LASER_FALL_SPEED: int = struct.field(pytree_node=False, default=1) ## laser falls straight down, no sideways drift
+    SATELLITE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=46) ## measured 44-48 frame gap between passes
 
     ## GAME_AREA_MAX_X is only the player's hard stop; world objects use
     ## the real screen edges like in ALE
@@ -302,6 +303,7 @@ class JamesBondState:
     satellite_laser_y: chex.Array
     satellite_laser_active: chex.Array
     satellite_laser_timer: chex.Array ## counts down to the next laser drop
+    satellite_respawn_timer: chex.Array ## breather between satellite passes
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -438,6 +440,8 @@ class JaxJamesBond(
             satellite_laser_timer=jnp.array(
                 self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32
             ),
+            ## Timer at 0 so the very first satellite appears right away
+            satellite_respawn_timer=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -1600,7 +1604,16 @@ class JaxJamesBond(
         # Check whose turn it is to spawn
         spawn_diamond = row_57_empty & state.spawn_diamond_next
         spawn_helicopter = row_57_empty & (~state.spawn_diamond_next)
-        can_spawn_satellite = ~next_satellite_active ## Only spawn when the previous satellite left the screen
+        ## Measured ~46 frame gap between passes: park the timer at full
+        ## while one is flying, count down while the sky is empty
+        satellite_respawn_timer = jnp.where(
+            next_satellite_active,
+            jnp.array(self.consts.SATELLITE_RESPAWN_FRAMES, dtype=jnp.int32),
+            jnp.maximum(state.satellite_respawn_timer - 1, 0),
+        )
+        can_spawn_satellite = (
+            (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1)
+        )
         can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
         # Flip the turn flag ONLY if a spawn is happening on this frame
         next_spawn_diamond_next = jnp.where(
@@ -1685,6 +1698,7 @@ class JaxJamesBond(
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
+            satellite_respawn_timer=satellite_respawn_timer,
             spawn_diamond_next=next_spawn_diamond_next,
             pit_x=next_pit_x,
             pit_y=next_pit_y,
