@@ -58,6 +58,16 @@ def get_default_asset_config() -> tuple:
                 'name': 'stars', 'type': 'group',
                 'files': ['stars_1.npy', 'stars_2.npy']
             },
+            ## Water scene actors
+            {
+                'name': 'scuba', 'type': 'group',
+                'files': ['scuba_1.npy', 'scuba_2.npy']
+            },
+            ## The green figure where a laser hits the water, two poses
+            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'},
+            {'name': 'splash_wide', 'type': 'single', 'file': 'explosion_2.npy'},
+            ## Recolored bolt for sinking past a living splash figure
+            {'name': 'laser_green', 'type': 'single', 'file': 'laser_green.npy'},
 
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
 
