@@ -734,9 +734,28 @@ class JaxJamesBond(
             1,
             0
         )
-        
+
+        ## Scene handover: clear the objects that belong to the old terrain
+        ## so pits don't leak into the water and a stale splash can't kill
+        ## the car back on land. The satellite keeps flying, only its laser
+        ## and per-pass counter start fresh.
+        switched = new_stage != state.stage
+
+        def park(v, park_value):
+            return jnp.where(switched, jnp.array(park_value, dtype=v.dtype), v)
+
         return state.replace(
-            stage = new_stage
+            stage = new_stage,
+            pit_active=park(state.pit_active, False),
+            scuba_active=park(state.scuba_active, False),
+            scuba_age=park(state.scuba_age, 0),
+            splash_active=park(state.splash_active, False),
+            splash_age=park(state.splash_age, 0),
+            satellite_laser_active=park(state.satellite_laser_active, False),
+            satellite_laser_timer=park(
+                state.satellite_laser_timer, self.consts.SATELLITE_LASER_DROP_PERIOD
+            ),
+            satellite_lasers_dropped=park(state.satellite_lasers_dropped, 0),
         )
 
     def step_player_stage_one( ## TODO: Switch to air logic?
@@ -1698,7 +1717,9 @@ class JaxJamesBond(
         can_spawn_satellite = (
             (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1)
         )
-        can_spawn_pit = ~next_pit_active ## Only spawn when the previous pit left the screen
+        ## Land gate added with the water work: pits were spawning into the
+        ## water and killing the boat (it rides at the same y as the car)
+        can_spawn_pit = (~next_pit_active) & on_land
 
         ## Scuba diver: water only, one at a time, same parked-timer trick
         ## as the satellite so the countdown starts once he is gone
