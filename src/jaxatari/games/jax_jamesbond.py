@@ -221,6 +221,14 @@ class JamesBondConstants(struct.PyTreeNode):
     SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333) ## vanishes on a clock, not at the edge
     SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
 
+    ## The green splash figure a spent bolt detonates into. It is its own
+    ## object, not the scuba diver recolored
+    SPLASH_WIDTH: int = struct.field(pytree_node=False, default=20)  ## explosion_1_(small).npy is 20x7
+    SPLASH_HEIGHT: int = struct.field(pytree_node=False, default=7)
+    SPLASH_Y: int = struct.field(pytree_node=False, default=123) ## straddles the surface row
+    SPLASH_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
+    SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=112) ## airborne above this is safe
+
     ## In the water the bolt sinks past the surface down to here (~y134-137 in ALE)
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132)
 
@@ -322,6 +330,10 @@ class JamesBondState:
     scuba_active: chex.Array
     scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
     scuba_respawn_timer: chex.Array ## breather before the next diver enters
+    ## Green splash figure: static in world space, rides the scroll left
+    splash_x: chex.Array
+    splash_active: chex.Array
+    splash_age: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -468,6 +480,10 @@ class JaxJamesBond(
             scuba_active=jnp.array(False, dtype=jnp.bool_),
             scuba_age=jnp.array(0, dtype=jnp.int32),
             scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
+            ## Same for the splash figure, it is only born from a bolt impact
+            splash_x=jnp.array(-1, dtype=jnp.int32),
+            splash_active=jnp.array(False, dtype=jnp.bool_),
+            splash_age=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -1590,6 +1606,19 @@ class JaxJamesBond(
             scuba_age < self.consts.SCUBA_LIFETIME_FRAMES
         )
 
+        # Green splash figure (Scroll left)
+        ## Static in world space, so it drifts with the terrain scroll and
+        ## burns out on its own clock. Born in _update_enemy_bombs
+        next_splash_x = jnp.where(
+            state.step_count % 4 == 0,
+            state.splash_x - 1,
+            state.splash_x
+        )
+        splash_age = jnp.where(state.splash_active, state.splash_age + 1, 0)
+        next_splash_active = state.splash_active & (
+            splash_age < self.consts.SPLASH_LIFETIME_FRAMES
+        )
+
         # Enemies
         ## Helicopter enemy (Scroll left)
         ## 1. Determine which speed zone the helicopter is currently in, also affecting melee behavior of helicopter
@@ -1766,6 +1795,9 @@ class JaxJamesBond(
             scuba_active=next_scuba_active,
             scuba_age=scuba_age,
             scuba_respawn_timer=scuba_respawn_timer,
+            splash_x=next_splash_x,
+            splash_active=next_splash_active,
+            splash_age=splash_age,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -1805,6 +1837,26 @@ class JaxJamesBond(
             jnp.array(ground, dtype=jnp.int32),
         )
         laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < laser_floor)
+
+        ## The spent bolt detonates into the green splash figure. Only ONE
+        ## figure exists at a time: a bolt landing while one is alive spawns
+        ## nothing, it just sinks recolored green and the living figure's
+        ## despawn clock RESTARTS. The figure is not the scuba diver.
+        detonate = jnp.logical_and(
+            jnp.logical_and(state.satellite_laser_active, laser_y >= laser_floor),
+            state.stage == 1,
+        )
+        spawn_splash = jnp.logical_and(detonate, jnp.logical_not(state.splash_active))
+        refresh_splash = jnp.logical_and(detonate, state.splash_active)
+        splash_x = jnp.where(
+            spawn_splash,
+            laser_x, ## the figure surfaces at [laser_x, laser_x+19], not centered
+            state.splash_x,
+        )
+        splash_active = jnp.logical_or(state.splash_active, spawn_splash)
+        splash_age = jnp.where(
+            jnp.logical_or(spawn_splash, refresh_splash), 0, state.splash_age
+        )
 
         ## 2. Helicopter drop. Measured against the ROM: the trigger is the
         ## distance to the player, not the searchlight. First bomb when the
@@ -1911,6 +1963,9 @@ class JaxJamesBond(
             satellite_laser_y=laser_y.astype(jnp.int32),
             satellite_laser_active=laser_active,
             satellite_laser_timer=laser_timer,
+            splash_x=splash_x.astype(jnp.int32),
+            splash_active=splash_active,
+            splash_age=splash_age,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
