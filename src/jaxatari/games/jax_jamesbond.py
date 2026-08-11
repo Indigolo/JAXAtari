@@ -2231,8 +2231,11 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_helicopter(raster, state)
         raster = self._render_satellite(raster, state)
         raster = self._render_scuba(raster, state)
+        raster = self._render_splash(raster, state)
 
         raster = self._render_bullets(raster, state)
+        ## After the bullets so the green recolor overdraws the normal bolt
+        raster = self._render_sinking_bolt(raster, state)
 
         ## Render life counter
         raster = self.jr.render_indicator(raster, 9, 184, state.lives, self.SHAPE_MASKS['life'], 16, 3) ## TODO: Maybe 5 like in ALE?
@@ -2417,6 +2420,52 @@ class JamesBondRenderer(JAXGameRenderer):
         )
 
         return jax.lax.cond(state.scuba_active, draw_fn, lambda r: r, raster)
+
+    def _render_splash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the green splash figure with its measured two-pose animation.
+
+        Frame-exact from ALE: narrow pose for 1 frame at spawn, then strict
+        7-frame phases alternate starting with the wide pose (4px further left).
+        """
+
+        ## The +6 shifts the phase so age 0 lands on narrow for one frame
+        narrow = ((state.splash_age + 6) // 7) % 2 == 0
+
+        def draw_fn(r):
+            return jax.lax.cond(
+                narrow,
+                lambda rr: self.jr.render_at_clipped(
+                    rr, state.splash_x, self.consts.SPLASH_Y,
+                    self.SHAPE_MASKS['splash'],
+                ),
+                lambda rr: self.jr.render_at_clipped(
+                    rr, state.splash_x - 4, self.consts.SPLASH_Y,
+                    self.SHAPE_MASKS['splash_wide'],
+                ),
+                r,
+            )
+
+        return jax.lax.cond(state.splash_active, draw_fn, lambda r: r, raster)
+
+    def _render_sinking_bolt(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """A bolt landing while the figure lives sinks radioactive-green."""
+
+        submerged = jnp.logical_and(
+            jnp.logical_and(state.stage == 1, state.splash_active),
+            jnp.logical_and(
+                state.satellite_laser_active,
+                state.satellite_laser_y > 119, ## below the waterline row
+            ),
+        )
+
+        draw_fn = lambda r: self.jr.render_at_clipped(
+            r,
+            state.satellite_laser_x,
+            state.satellite_laser_y,
+            self.SHAPE_MASKS['laser_green'],
+        )
+
+        return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
 
     def _render_bullets(self, raster: jnp.ndarray, state: JamesBondState,) -> jnp.ndarray:
         """Draw all projectiles, they share the same 1x4 bullet sprite."""
