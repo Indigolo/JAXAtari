@@ -466,7 +466,6 @@ class JamesBondState:
     sub_torp_x: chex.Array
     sub_torp_y: chex.Array
     sub_torp_active: chex.Array
-    stage_step: chex.Array ## frames spent inside the current stage
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -638,7 +637,6 @@ class JaxJamesBond(
             sub_torp_x=jnp.array(-1, dtype=jnp.int32),
             sub_torp_y=jnp.array(-1, dtype=jnp.int32),
             sub_torp_active=jnp.array(False, dtype=jnp.bool_),
-            stage_step=jnp.array(0, dtype=jnp.int32),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -1815,7 +1813,7 @@ class JaxJamesBond(
             (state, atari_action)
         )
 
-    def _update_stage(self, state: JamesBondState) -> JamesBondState:
+    def _update_stage(self, state: JamesBondState) -> JamesBondState: ## TODO: change text, delete unneccessary variables
         """Advance the scene clock and roll over to the next scene when due.
 
         The real game cycles terrain types as the vehicle travels; here the
@@ -1825,27 +1823,27 @@ class JaxJamesBond(
         empty, exactly like the terrain handover in the original.
         """
 
-        stage_step = state.stage_step + 1
-        stage_length = jnp.where(
-            state.stage == 0,
-            jnp.array(self.consts.STAGE_ONE_LENGTH, dtype=jnp.int32),
-            jnp.array(self.consts.STAGE_TWO_LENGTH, dtype=jnp.int32),
+        lives_lost = self.consts.MAX_LIVES - state.lives
+
+        new_stage = jnp.where( ## TODO: add transition to stage 3
+            state.step_count > 3000 + lives_lost * 1000,
+            1,
+            state.stage
         )
-        ## Stage 2 (the second water scene) never ended in a 22k frame ALE
-        ## probe, so only stages 0 and 1 have exits. Boarding the dock at
-        ## the end of the first water scene pays the 5000 point bonus.
-        switch = jnp.logical_and(stage_step >= stage_length, state.stage < 2)
-        bonus = jnp.logical_and(switch, state.stage == 1)
-        next_stage = jnp.where(switch, state.stage + 1, state.stage)
-        stage_step = jnp.where(switch, 0, stage_step)
+
+        new_stage = jnp.where( ## TODO: Correct logic? Optimize
+            jnp.logical_and(new_stage == 1, state.score >= 5000),
+            2,
+            new_stage
+        )
+
+        switch = state.stage != new_stage
 
         def clear(v, park):
             return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
 
         return state.replace(
-            stage=next_stage,
-            stage_step=stage_step,
-            score=state.score + bonus.astype(jnp.int32) * self.consts.SCORE_STAGE_BONUS,
+            stage=new_stage,
             ## Land objects vanish at the shoreline
             helicopter_active=clear(state.helicopter_active, False),
             helicopter_melee_step=clear(state.helicopter_melee_step, 0),
