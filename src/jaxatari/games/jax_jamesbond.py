@@ -32,7 +32,7 @@ JB_SPRITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "
 def get_default_asset_config() -> tuple:
         asset_config = [
             {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Placeholder, extract the real background sprite
-            {'name': 'ground', 'type': 'single', 'file': 'ground_unkempt.npy'}, ## TODO: Ground and Background the same sprite?
+            {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
             {
                 'name': 'car', 'type': 'group',
                 ## All three recolors feed the death color-cycle
@@ -63,14 +63,14 @@ def get_default_asset_config() -> tuple:
                 'files': ['stars_1.npy', 'stars_2.npy']
             },
             ## Water scene terrain and actors
-            {'name': 'water', 'type': 'single', 'file': 'water_unkempt.npy'},
+            {'name': 'water', 'type': 'single', 'file': 'water.npy'},
             ## seabed_full is the complete 160px repeating strip including
             ## the 14-column valley gap; the old seabed.npy had the gap
             ## columns deleted, which tiled a valley-less seabed.
             {'name': 'seabed', 'type': 'single', 'file': 'seabed_full.npy'},
             {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'}, ## solid 74,74,74 measured in ALE
             ## The splash frogman's two poses, both pixel-exact extractions
-            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'},
+            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'}, ## TODO: Keep radiation sprites together
             {'name': 'splash_wide', 'type': 'single', 'file': 'explosion_2.npy'},
             ## A bolt sinking past a living frogman is drawn in his colors
             {'name': 'laser_green', 'type': 'single', 'file': 'laser_green.npy'},
@@ -92,11 +92,11 @@ def get_default_asset_config() -> tuple:
 
             {
                 'name': 'score_digits', 'type': 'digits',
-                'pattern': 'score_{}.npy' ## TODO: 6-9 are placeholders, extract the real digits
+                'pattern': 'score_{}.npy'
             },
             {
-                'name': 'bullet', 'type': 'single', ## TODO: Placeholder, extract the real bullet sprite. Comment: What? no it's not, it's the real bullet sprite
-                'file': 'bullet.npy'
+                'name': 'bullet', 'type': 'group', 
+                'files': ['bullet.npy', 'w_bullet.npy'] ## w_bullet is the player's water bullet
             }
         ]
         return asset_config
@@ -125,7 +125,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SCREEN_WIDTH: int = struct.field(pytree_node=False, default=160)
     SCREEN_HEIGHT: int = struct.field(pytree_node=False, default=210)
     ## Already has player sprite width/height respected
-    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=4) ## Playable Area: 5 (Coordinate system starting with 1) -- Shown in /jb_sprites/game_area_min_x.npy
+    GAME_AREA_MIN_X: int = struct.field(pytree_node=False, default=4) ## Playable Area: 5 (Coordinate system starting with 1)
     GAME_AREA_MAX_X: int = struct.field(pytree_node=False, default=73) ## Playable Area: 81 (Coordinate system starting with 1)
     GAME_AREA_MIN_Y: int = struct.field(pytree_node=False, default=0) ## Playable Area: 123 (Top-left coordinate system); 87 (Bottom-right co-sys)
     GAME_AREA_MAX_Y: int = struct.field(pytree_node=False, default=119)
@@ -2953,7 +2953,7 @@ class JamesBondRenderer(JAXGameRenderer):
         return self.jr.render_from_palette(raster, self.PALETTE)
 
     def _render_ground(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the static ground strip using the existing ground_unkempt sprite.
+        """Draw the static ground strip using the existing ground sprite.
 
         The sprite's first row is the gray road top, which sits at row 124
         in the real game -- BELOW the player, whose hull rides rows
@@ -3105,8 +3105,13 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = one(raster, state.wb_flyer_active, state.wb_flyer_x,
                      jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32), 'flyer_red')
         ## Submarine torpedo: short underwater dart
-        raster = one(raster, state.sub_torp_active, state.sub_torp_x,
-                     state.sub_torp_y, 'bullet')
+        raster = jax.lax.cond(
+            state.sub_torp_active,
+            lambda r: self.jr.render_at_clipped(r, state.sub_torp_x, state.sub_torp_y, self.SHAPE_MASKS['bullet'][0]),
+            lambda r: r,
+            raster,
+        )
+
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
@@ -3298,11 +3303,17 @@ class JamesBondRenderer(JAXGameRenderer):
         def render_single_bullet(i, current_raster):
             should_draw = (active_bullets[i] == 1)
 
+            sprite_idx = jnp.where( ## Different sprite for water bullet
+                i == 1,
+                1,
+                0
+            )
+
             draw_fn = lambda r: self.jr.render_at_clipped(
                 r,
                 bullet_positions[i][0],
                 bullet_positions[i][1],
-                self.SHAPE_MASKS['bullet'],
+                self.SHAPE_MASKS['bullet'][sprite_idx],
             )
 
             return jax.lax.cond(should_draw, draw_fn, lambda r: r, current_raster)
