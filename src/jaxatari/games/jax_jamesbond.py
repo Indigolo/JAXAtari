@@ -32,6 +32,7 @@ JB_SPRITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "
 def get_default_asset_config() -> tuple:
         asset_config = [
             {'name': 'background', 'type': 'background', 'file': 'background.npy'}, ## TODO: Placeholder, extract the real background sprite
+            {'name': 'black_border', 'type': 'single', 'file': 'black_border.npy'}, ## For not showing sprites at ends (x < 3, x > 207) of the screen.
             {'name': 'ground', 'type': 'single', 'file': 'ground.npy'}, ## TODO: Ground and Background the same sprite?
             {
                 'name': 'car', 'type': 'group',
@@ -2898,7 +2899,7 @@ class JamesBondRenderer(JAXGameRenderer):
         ## the stars still twinkle on it like in the real scenes
         raster = jax.lax.cond(
             state.stage >= 1,
-            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
+            lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['water_sky']),
             lambda r: r,
             raster,
         )
@@ -2910,7 +2911,7 @@ class JamesBondRenderer(JAXGameRenderer):
                 state.stage >= 1,
                 state.death_timer == self.consts.DEATH_ANIMATION_FRAMES,
             ),
-            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['death_flash']),
+            lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['death_flash']),
             lambda r: r,
             raster,
         )
@@ -2943,6 +2944,20 @@ class JamesBondRenderer(JAXGameRenderer):
             jnp.maximum(state.lives - 1, 0),
             self.SHAPE_MASKS['life'], 16, 3,
         )
+
+        ## Render black borders on the sides of the screen; TODO: Optimize
+        raster = self.jr.render_at(
+            raster,
+            0,
+            2,
+            self.SHAPE_MASKS['black_border']
+        )
+        raster = self.jr.render_at(
+            raster,
+            210,
+            2,
+            self.SHAPE_MASKS['black_border']
+        )
         
         ## Render Score counter
         score_digits = self.jr.int_to_digits(state.score, 4) ## TODO: Max score 4 digits?
@@ -2961,7 +2976,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return self.jr.render_at_clipped(
             raster,
-            8,    # x - real playfield left edge (columns 0-7 stay black like ALE)
+            4,    # x - real playfield left edge (columns 0-7 stay black like ALE)
             123,  # y - road top just under the wheels, like the real rows
             self.SHAPE_MASKS['ground'],
         )
@@ -2980,8 +2995,8 @@ class JamesBondRenderer(JAXGameRenderer):
         ## (119-122) rides half above, half below the waterline.
         raster = jax.lax.cond(
             state.stage == 2,
-            lambda r: self.jr.render_at_clipped(r, 8, 121, self.SHAPE_MASKS['water_b']),
-            lambda r: self.jr.render_at_clipped(r, 8, 121, self.SHAPE_MASKS['water']),
+            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water_b']),
+            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water']),
             raster,
         )
         ## The seabed is a 160px repeating strip that scrolls left with the
@@ -2990,13 +3005,13 @@ class JamesBondRenderer(JAXGameRenderer):
         scroll = (state.step_count // 4) % 160
         raster = self.jr.render_at_clipped(
             raster,
-            8 - scroll,
+            4 - scroll,
             158,  # y - measured seabed top row
             self.SHAPE_MASKS['seabed'],
         )
         return self.jr.render_at_clipped(
             raster,
-            8 - scroll + 160,
+            4 - scroll + 160,
             158,
             self.SHAPE_MASKS['seabed'],
         )
@@ -3092,7 +3107,7 @@ class JamesBondRenderer(JAXGameRenderer):
                 state.wb_flyer_active,
                 state.wb_flyer_timer < self.consts.SKY_FLASH_FRAMES,
             ),
-            jnp.array(8, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
+            jnp.array(4, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
         )
         raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
         raster = one(raster, state.submarine_active, state.submarine_x,
