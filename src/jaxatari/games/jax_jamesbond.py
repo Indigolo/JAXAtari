@@ -287,6 +287,9 @@ class JamesBondConstants(struct.PyTreeNode):
     SPLASH_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
     SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=112) ## airborne above this is safe
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132) ## bolt sinks this deep before detonating
+    ## Oil rig, sprite is a static 16x22
+    OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
+    OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
 
     ## Second water scene (after the dock bonus): darker water and a fresh
     ## enemy roster, all sprites cropped from real ALE frames. The floating
@@ -447,6 +450,10 @@ class JamesBondState:
     splash_x: chex.Array
     splash_active: chex.Array
     splash_age: chex.Array
+    ## Oil rig
+    oil_rig_x: chex.Array
+    oil_rig_y: chex.Array
+    oil_rig_active: chex.Array
     ## Second water scene roster
     rocket_x: chex.Array
     rocket_y: chex.Array
@@ -621,6 +628,10 @@ class JaxJamesBond(
             splash_x=jnp.array(-1, dtype=jnp.int32),
             splash_active=jnp.array(False, dtype=jnp.bool_),
             splash_age=jnp.array(0, dtype=jnp.int32),
+            oil_rig_x=jnp.array(-1, dtype=jnp.int32),
+            oil_rig_y=jnp.array(-1, dtype=jnp.int32),
+            oil_rig_active=jnp.array(False, dtype=jnp.bool_),
+            #oil_rig_visible_timer=jnp.array(0, dtype=jnp.int32),
             rocket_x=jnp.array(-1, dtype=jnp.int32),
             rocket_y=jnp.array(-1, dtype=jnp.int32),
             rocket_active=jnp.array(False, dtype=jnp.bool_),
@@ -1915,6 +1926,17 @@ class JaxJamesBond(
             splash_age < self.consts.SPLASH_LIFETIME_FRAMES
         )
 
+        # Oil rig (Scroll left)
+        ## Measured: the rig drifts left 1px every 4th frame
+        next_oil_rig_x = jnp.where(
+            state.step_count % 4 == 3,
+            state.oil_rig_x - 1,
+            state.oil_rig_x
+        )
+        next_oil_rig_y = state.oil_rig_y
+        oil_rig_on_screen = next_oil_rig_x >= (self.consts.GAME_AREA_MAX_X - self.consts.OIL_RIG_WIDTH)
+        next_oil_rig_active = state.oil_rig_active & oil_rig_on_screen
+
         # Second water scene roster (stage 2)
         in_water_b = state.stage == 2
         ## Rocket, measured cycle: floats submerged for a few frames, then
@@ -2050,7 +2072,7 @@ class JaxJamesBond(
         # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
         # per crossing). Only the second water scene retires it.
         spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b)
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active)
         ## The satellite takes a measured ~65 frame breather between passes;
         ## the gap also lets its per-pass laser counter reset.
         satellite_respawn_timer = jnp.where(
@@ -2061,7 +2083,7 @@ class JaxJamesBond(
         ## The satellite patrols the land and the first water scene; the
         ## second water scene never shows it (22k frame scan).
         can_spawn_satellite = (
-            (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1)
+            (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1) & (~state.oil_rig_active)
         )
         can_spawn_pit = (~next_pit_active) & on_land ## Only spawn when the previous pit left the screen
 
@@ -2139,12 +2161,30 @@ class JaxJamesBond(
             jnp.where(on_land, 57, 62),
             next_diamond_y
         )
-        # Scubas
-        # Apply new active status, position coordinates for spawned scubas
-        # next_scuba_active
-        # next_scuba_x
-        # next_scuba_y
-
+        # Oil rig
+        ## Oil rig visibility countdown
+        ##next_oil_rig_visible_timer = jnp.maximum(state.oil_rig_visible_timer - 1, 0)
+        ## Trigger visibility flash when player scores on diamond or scuba
+        ## Have to pass 'scored_points_this_frame' boolean from collision
+        ##next_oil_rig_visible_timer = jnp.where(
+        ##    scored_points_this_frame & state.oil_rig_active,
+        ##    self.consts.OIL_RIG_FLASH_FRAMES, # Placeholder for N frames
+        ##    next_oil_rig_visible_timer
+        ##)
+        # Apply new active status, position coordinates for spawned oil rig
+        trigger_oil_rig_spawn = False # Replace with specific level-end condition
+        spawn_oil_rig = trigger_oil_rig_spawn & (~next_oil_rig_active)
+        next_oil_rig_active = next_oil_rig_active | spawn_oil_rig
+        next_oil_rig_x = jnp.where(
+            spawn_oil_rig,
+            self.consts.OBJECT_SPAWN_X_FAR, # here i use x position as diamonds
+            next_oil_rig_x
+        )
+        next_oil_rig_y = jnp.where(
+            spawn_oil_rig,
+            99,
+            next_oil_rig_y
+        )
         # Enemies
         ## Helicopter
         # Apply new active status, position coordinates for spawned helicopter enemies
@@ -2193,9 +2233,6 @@ class JaxJamesBond(
             diamond_x=next_diamond_x,
             diamond_y=next_diamond_y,
             diamond_active=next_diamond_active,
-            # scuba_x=next_scuba_x,
-            # scuba_y=next_scuba_y,
-            # scuba_active=next_scuba_active,
             helicopter_x=next_helicopter_x,
             helicopter_y=next_helicopter_y,
             helicopter_active=next_helicopter_active,
@@ -2216,6 +2253,9 @@ class JaxJamesBond(
             splash_x=next_splash_x,
             splash_active=next_splash_active,
             splash_age=splash_age,
+            oil_rig_x=next_oil_rig_x,
+            oil_rig_y=next_oil_rig_y,
+            oil_rig_acive=next_oil_rig_active,
             rocket_x=next_rocket_x,
             rocket_y=next_rocket_y,
             rocket_active=next_rocket_active,
@@ -3063,6 +3103,19 @@ class JamesBondRenderer(JAXGameRenderer):
             )
 
         return jax.lax.cond(state.splash_active, draw_fn, lambda r: r, raster)
+
+    ##def _render_oil_rig(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+    ##    """ Draw the oil rig only during active flase frames. """
+    ##    is_visible = state.oil_rig_active & (state.oil_rig_visible_timer > 0)
+    ##
+    ##    draw_fn = lambda r: self.jr.render_at_clipped(
+    ##        r,
+    ##        state.oil_rig_x,
+    ##        state.oil_rig_y,
+    ##        self.SHAPE_MASKS['oil_rig'][0],
+    ##    )
+    ##
+    ##    return jax.law.cond(is_visible, draw_fn, lambda r: r, raster)
 
     def _render_sinking_bolt(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """A bolt landing while the frogman lives sinks radioactive-green.
