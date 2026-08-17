@@ -69,6 +69,17 @@ def get_default_asset_config() -> tuple:
             ## Recolored bolt for sinking past a living splash figure
             {'name': 'laser_green', 'type': 'single', 'file': 'laser_green.npy'},
 
+            ## Water scene terrain. water_unkempt is already the real ROM blue
+            ## (45,50,184); the sky is a solid (74,74,74) slab; seabed_water is
+            ## the wide seabed strip recoloured to the real (50,132,50) green
+            ## (the shared seabed.npy keeps its land colours, untouched)
+            ## water_full is the solid band: water_unkempt tapers into a valley
+            ## notch at the bottom, which let the black background show through
+            ## where the real game has plain blue behind the seabed
+            {'name': 'water', 'type': 'single', 'file': 'water_full.npy'},
+            {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'},
+            {'name': 'seabed_water', 'type': 'single', 'file': 'seabed_water.npy'},
+
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
 
             {
@@ -2400,8 +2411,25 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
+        ## The water scene has a solid gray sky where the land scene has black.
+        ## It goes UNDER the stars, because in the real game the stars still
+        ## twinkle on top of the gray.
+        raster = jax.lax.cond(
+            state.stage >= 1,
+            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
+            lambda r: r,
+            raster,
+        )
         raster = self._render_stars(raster, state)
-        raster = self._render_ground(raster, state)
+        ## Terrain follows the scene: dry land in stage 0, water in stage 1.
+        ## Before this the renderer always drew the ground, so the whole water
+        ## scene was played on a picture of the road.
+        raster = jax.lax.cond(
+            state.stage == 0,
+            lambda r: self._render_ground(r, state),
+            lambda r: self._render_water(r, state),
+            raster,
+        )
 
         raster = self._render_car(raster, state)
         raster = self._render_diamond(raster, state)
@@ -2432,6 +2460,28 @@ class JamesBondRenderer(JAXGameRenderer):
             4,    # x - matches GAME_AREA_MIN_X
             119,  # y - matches GAME_AREA_MAX_Y / PLAYER_INIT_Y
             self.SHAPE_MASKS['ground'],
+        )
+
+    def _render_water(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the water scene terrain: blue water with the seabed under it.
+
+        Rows measured off the real ROM (jump straight there in ALE with
+        RAM[13]=1): gray sky 29-120, blue water 121-179 starting at x=8,
+        and the seabed mounds rising out of the water near the bottom.
+        """
+
+        raster = self.jr.render_at_clipped(
+            raster,
+            8,    # x - the play area starts here in the real scene
+            121,  # y - the waterline, right under the gray sky
+            self.SHAPE_MASKS['water'],
+        )
+        ## The seabed sits on the bottom of the water band (base at row 180)
+        return self.jr.render_at_clipped(
+            raster,
+            0,
+            158,
+            self.SHAPE_MASKS['seabed_water'],
         )
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
