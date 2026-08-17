@@ -220,6 +220,10 @@ class JamesBondConstants(struct.PyTreeNode):
     SCUBA_SPAWN_Y: int = struct.field(pytree_node=False, default=129) ## body below the surface row
     SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333) ## vanishes on a clock, not at the edge
     SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
+    ## When a bomb comes down and the diver is in the water, HE is the one that
+    ## goes radioactive, and not straight away -- it takes a moment.
+    SCUBA_RADIOACTIVE_DELAY: int = struct.field(pytree_node=False, default=30) ## bomb reaches him -> he turns
+    SCUBA_RADIOACTIVE_FRAMES: int = struct.field(pytree_node=False, default=120) ## how long he stays radioactive
 
     ## The green splash figure a spent bolt detonates into. It is its own
     ## object, not the scuba diver recolored
@@ -229,8 +233,11 @@ class JamesBondConstants(struct.PyTreeNode):
     SPLASH_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
     SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=112) ## airborne above this is safe
 
-    ## In the water the bolt sinks past the surface down to here (~y134-137 in ALE)
+    ## In the water the bolt sinks past the surface. It does NOT have to reach
+    ## the sea floor: playtesting the real game shows it goes radioactive part
+    ## way down, a moment after it enters the water.
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132)
+    WATER_RADIOACTIVE_Y: int = struct.field(pytree_node=False, default=127) ## depth where the bolt goes radioactive
 
     ## Water scene satellite: fires when its belly is this far to the RIGHT
     ## of the player's hull, checked at discrete moments, never from behind
@@ -338,6 +345,9 @@ class JamesBondState:
     scuba_active: chex.Array
     scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
     scuba_respawn_timer: chex.Array ## breather before the next diver enters
+    scuba_radioactive: chex.Array ## he is currently the radioactive one
+    scuba_radioactive_age: chex.Array ## how long he has been glowing
+    scuba_radioactive_timer: chex.Array ## bomb reached him, counting down to the change
     ## Green splash figure: static in world space, rides the scroll left
     splash_x: chex.Array
     splash_active: chex.Array
@@ -489,6 +499,9 @@ class JaxJamesBond(
             scuba_active=jnp.array(False, dtype=jnp.bool_),
             scuba_age=jnp.array(0, dtype=jnp.int32),
             scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
+            scuba_radioactive=jnp.array(False, dtype=jnp.bool_),
+            scuba_radioactive_age=jnp.array(0, dtype=jnp.int32),
+            scuba_radioactive_timer=jnp.array(0, dtype=jnp.int32),
             ## Same for the splash figure, it is only born from a bolt impact
             splash_x=jnp.array(-1, dtype=jnp.int32),
             splash_active=jnp.array(False, dtype=jnp.bool_),
@@ -749,6 +762,9 @@ class JaxJamesBond(
             pit_active=park(state.pit_active, False),
             scuba_active=park(state.scuba_active, False),
             scuba_age=park(state.scuba_age, 0),
+            scuba_radioactive=park(state.scuba_radioactive, False),
+            scuba_radioactive_age=park(state.scuba_radioactive_age, 0),
+            scuba_radioactive_timer=park(state.scuba_radioactive_timer, 0),
             splash_active=park(state.splash_active, False),
             splash_age=park(state.splash_age, 0),
             satellite_laser_active=park(state.satellite_laser_active, False),
@@ -1630,9 +1646,20 @@ class JaxJamesBond(
         )
         next_scuba_y = state.scuba_y
         scuba_age = jnp.where(state.scuba_active, state.scuba_age + 1, 0)
-        next_scuba_active = state.scuba_active & (
-            scuba_age < self.consts.SCUBA_LIFETIME_FRAMES
+        ## The glow runs on its own clock and ends by itself
+        scuba_rad_age = jnp.where(
+            state.scuba_radioactive, state.scuba_radioactive_age + 1, 0
         )
+        still_glowing = state.scuba_radioactive & (
+            scuba_rad_age < self.consts.SCUBA_RADIOACTIVE_FRAMES
+        )
+        ## He normally vanishes on his age clock, but a radioactive diver stays
+        ## until he has finished glowing -- otherwise the radioactive slot could
+        ## disappear mid-glow and the rule "only one at a time" would be moot
+        next_scuba_active = state.scuba_active & (
+            (scuba_age < self.consts.SCUBA_LIFETIME_FRAMES) | still_glowing
+        )
+        next_scuba_radioactive = still_glowing & next_scuba_active
 
         # Green splash figure (Scroll left)
         ## Static in world space, so it drifts with the terrain scroll and
@@ -1825,6 +1852,8 @@ class JaxJamesBond(
             scuba_active=next_scuba_active,
             scuba_age=scuba_age,
             scuba_respawn_timer=scuba_respawn_timer,
+            scuba_radioactive=next_scuba_radioactive,
+            scuba_radioactive_age=scuba_rad_age,
             splash_x=next_splash_x,
             splash_active=next_splash_active,
             splash_age=splash_age,
@@ -1868,16 +1897,30 @@ class JaxJamesBond(
         )
         laser_active = jnp.logical_and(state.satellite_laser_active, laser_y < laser_floor)
 
-        ## The spent bolt detonates into the green splash figure. Only ONE
-        ## figure exists at a time: a bolt landing while one is alive spawns
-        ## nothing, it just sinks recolored green and the living figure's
-        ## despawn clock RESTARTS. The figure is not the scuba diver.
-        detonate = jnp.logical_and(
-            jnp.logical_and(state.satellite_laser_active, laser_y >= laser_floor),
+        ## The bolt goes radioactive a moment AFTER it enters the water, part
+        ## way down -- not at the sea floor (checked by playing the real game).
+        reached_depth = jnp.logical_and(
+            jnp.logical_and(
+                state.satellite_laser_active,
+                laser_y >= self.consts.WATER_RADIOACTIVE_Y,
+            ),
             state.stage == 1,
         )
-        spawn_splash = jnp.logical_and(detonate, jnp.logical_not(state.splash_active))
-        refresh_splash = jnp.logical_and(detonate, state.splash_active)
+        ## Whichever object goes radioactive, the bolt is spent at that point
+        laser_active = jnp.logical_and(laser_active, jnp.logical_not(reached_depth))
+
+        ## Only ONE radioactive thing may exist at a time, and the diver has
+        ## priority: if he is in the water HE becomes the radioactive one and
+        ## the bomb does not. The bomb only goes radioactive itself when there
+        ## is no diver around.
+        already_radioactive = jnp.logical_or(state.splash_active, state.scuba_radioactive)
+        free_slot = jnp.logical_not(already_radioactive)
+
+        spawn_splash = jnp.logical_and(
+            jnp.logical_and(reached_depth, free_slot),
+            jnp.logical_not(state.scuba_active), ## no diver -> the bomb glows
+        )
+        refresh_splash = jnp.logical_and(reached_depth, state.splash_active)
         splash_x = jnp.where(
             spawn_splash,
             laser_x, ## the figure surfaces at [laser_x, laser_x+19], not centered
@@ -1886,6 +1929,33 @@ class JaxJamesBond(
         splash_active = jnp.logical_or(state.splash_active, spawn_splash)
         splash_age = jnp.where(
             jnp.logical_or(spawn_splash, refresh_splash), 0, state.splash_age
+        )
+
+        ## Diver present and the slot is free -> arm HIM instead. He does not
+        ## light up instantly, the change takes SCUBA_RADIOACTIVE_DELAY frames.
+        arm_scuba = jnp.logical_and(
+            jnp.logical_and(reached_depth, free_slot),
+            state.scuba_active,
+        )
+        ## A second bomb while he is already glowing just tops his clock back up
+        refresh_scuba = jnp.logical_and(reached_depth, state.scuba_radioactive)
+
+        scuba_rad_timer = jnp.where(
+            arm_scuba,
+            jnp.array(self.consts.SCUBA_RADIOACTIVE_DELAY, dtype=jnp.int32),
+            jnp.maximum(state.scuba_radioactive_timer - 1, 0),
+        )
+        ## He turns on the frame the delay runs out (and only if he is still there)
+        turns_now = jnp.logical_and(
+            jnp.logical_and(state.scuba_radioactive_timer == 1, scuba_rad_timer == 0),
+            state.scuba_active,
+        )
+        scuba_radioactive = jnp.logical_and(
+            jnp.logical_or(state.scuba_radioactive, turns_now),
+            state.scuba_active, ## if he despawns the glow goes with him
+        )
+        scuba_radioactive_age = jnp.where(
+            jnp.logical_or(turns_now, refresh_scuba), 0, state.scuba_radioactive_age
         )
 
         ## 2. Helicopter drop. Measured against the ROM: the trigger is the
@@ -2025,6 +2095,9 @@ class JaxJamesBond(
             splash_x=splash_x.astype(jnp.int32),
             splash_active=splash_active,
             splash_age=splash_age,
+            scuba_radioactive=scuba_radioactive,
+            scuba_radioactive_age=scuba_radioactive_age,
+            scuba_radioactive_timer=scuba_rad_timer,
         )
 
     def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
@@ -2511,11 +2584,16 @@ class JamesBondRenderer(JAXGameRenderer):
     def _render_scuba(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the scuba diver, alternating his two swim frames.
 
-        He flips sprites every 15 frames and never changes appearance
-        beyond that, checked frame by frame in ALE.
+        Normally he flips sprites every 15 frames. Once a bomb has made him
+        radioactive he flickers fast instead, so you can see at a glance
+        which object is currently the radioactive one.
         """
 
-        sprite_idx = jnp.where((state.step_count // 15) % 2 == 0, 0, 1)
+        sprite_idx = jnp.where(
+            state.scuba_radioactive,
+            (state.step_count // 2) % 2,   ## fast flicker while radioactive
+            (state.step_count // 15) % 2,  ## normal lazy swim
+        )
 
         draw_fn = lambda r: self.jr.render_at_clipped(
             r,
