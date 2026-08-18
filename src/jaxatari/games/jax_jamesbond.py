@@ -2255,7 +2255,7 @@ class JaxJamesBond(
             splash_age=splash_age,
             oil_rig_x=next_oil_rig_x,
             oil_rig_y=next_oil_rig_y,
-            oil_rig_acive=next_oil_rig_active,
+            oil_rig_active=next_oil_rig_active,
             rocket_x=next_rocket_x,
             rocket_y=next_rocket_y,
             rocket_active=next_rocket_active,
@@ -2949,7 +2949,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = jax.lax.cond(
             jnp.logical_and(
                 state.stage >= 1,
-                state.death_timer == self.consts.DEATH_ANIMATION_FRAMES,
+                state.death_timer >= self.consts.DEATH_ANIMATION_FRAMES - 2,
             ),
             lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['death_flash']),
             lambda r: r,

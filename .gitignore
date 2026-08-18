@@ -11,3 +11,5 @@ results/
 docs/build/
 .python-version
 
+.venv312/
+.venv312/
