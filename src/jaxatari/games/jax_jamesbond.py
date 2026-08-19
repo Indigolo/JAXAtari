@@ -90,6 +90,19 @@ def get_default_asset_config() -> tuple:
             {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
             {'name': 'flyer_red', 'type': 'single', 'file': 'flyer_red.npy'},
             {'name': 'sky_flash', 'type': 'single', 'file': 'sky_flash.npy'}, ## whole sky flashes gray on the burst
+            ## Third water scene ("purple" scene), everything extracted from a
+            ## longplay video of the real game frame by frame: periwinkle sky
+            ## with clouds, navy water, launching shuttles, the red heli, and
+            ## the steamship that ends the scene
+            {'name': 'wc_sky', 'type': 'single', 'file': 'wc_sky.npy'},
+            {'name': 'wc_water', 'type': 'single', 'file': 'wc_water.npy'},
+            {'name': 'wc_seabed', 'type': 'single', 'file': 'wc_seabed.npy'},
+            {'name': 'cloud', 'type': 'single', 'file': 'cloud.npy'},
+            {'name': 'shuttle', 'type': 'single', 'file': 'shuttle.npy'},
+            {'name': 'shuttle_fire', 'type': 'single', 'file': 'shuttle_fire.npy'},
+            {'name': 'ship', 'type': 'single', 'file': 'ship.npy'},
+            {'name': 'heli_red', 'type': 'single', 'file': 'heli_red.npy'},
+            {'name': 'bomb_red', 'type': 'single', 'file': 'bomb_red.npy'},
 
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
 
@@ -293,6 +306,19 @@ class JamesBondConstants(struct.PyTreeNode):
     ## dies before the surface. Measured harmless, pure theatre
     SUB_TORPEDO_PERIOD: int = struct.field(pytree_node=False, default=400)
 
+    ## Third water scene (stage 3), all behavior read off the longplay video:
+    ## the launch-pad pyramids drift in the water for a while, then ignite
+    ## and climb into the sky exactly like the stage-2 rocket -- same object,
+    ## different sprite and a much longer float. The small red helicopter
+    ## patrols this scene dropping its bombs, and near the end a steamship
+    ## crosses the surface ahead of the scene bonus.
+    WC_SHUTTLE_FLOAT_FRAMES: int = struct.field(pytree_node=False, default=240)
+    WC_SHUTTLE_Y: int = struct.field(pytree_node=False, default=131) ## drifts mostly submerged
+    WC_SHIP_LEAD_FRAMES: int = struct.field(pytree_node=False, default=800) ## ship shows ~13s before the bonus
+    WC_SHIP_Y: int = struct.field(pytree_node=False, default=106) ## hull straddles the waterline
+    WC_SHIP_WIDTH: int = struct.field(pytree_node=False, default=16)
+    WC_SHIP_HEIGHT: int = struct.field(pytree_node=False, default=16)
+
     ## Stage progression, forward only, cycling 0->1->2->3->0. The land and
     ## first-water lengths were measured in ALE on the test branch; the later
     ## two were timed off a longplay video (water B ~14s, water C ~96s).
@@ -441,6 +467,9 @@ class JamesBondState:
     sub_torp_x: chex.Array
     sub_torp_y: chex.Array
     sub_torp_active: chex.Array
+    ## Third water scene: the steamship that crosses ahead of the bonus
+    wc_ship_x: chex.Array
+    wc_ship_active: chex.Array
     collected_diamond: chex.Array
     hit_enemy: chex.Array
     fired_bullet: chex.Array
@@ -614,6 +643,8 @@ class JaxJamesBond(
             sub_torp_x=jnp.array(-1, dtype=jnp.int32),
             sub_torp_y=jnp.array(-1, dtype=jnp.int32),
             sub_torp_active=jnp.array(False, dtype=jnp.bool_),
+            wc_ship_x=jnp.array(-1, dtype=jnp.int32),
+            wc_ship_active=jnp.array(False, dtype=jnp.bool_),
             collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
@@ -897,7 +928,8 @@ class JaxJamesBond(
                 state.satellite_laser_timer, self.consts.SATELLITE_LASER_DROP_PERIOD
             ),
             satellite_lasers_dropped=park(state.satellite_lasers_dropped, 0),
-            ## Stage-2 roster vanishes when its scene ends
+            ## Late-scene rosters vanish when their scene ends, and the
+            ## helicopter with its bomb hands over cleanly too
             rocket_active=park(state.rocket_active, False),
             rocket_age=park(state.rocket_age, 0),
             submarine_active=park(state.submarine_active, False),
@@ -905,6 +937,9 @@ class JaxJamesBond(
             wb_flyer_active=park(state.wb_flyer_active, False),
             wb_flyer_timer=park(state.wb_flyer_timer, 0),
             sub_torp_active=park(state.sub_torp_active, False),
+            wc_ship_active=park(state.wc_ship_active, False),
+            helicopter_active=park(state.helicopter_active, False),
+            helicopter_bomb_active=park(state.helicopter_bomb_active, False),
         )
 
     def step_player_stage_one( ## TODO: Switch to air logic?
@@ -1811,13 +1846,22 @@ class JaxJamesBond(
             splash_age < self.consts.SPLASH_LIFETIME_FRAMES
         )
 
-        # Second water scene roster (stage 2)
+        # Second and third water scene roster
         in_water_b = state.stage == 2
-        ## Rocket: floats submerged a few frames, then climbs straight up
-        ## 1px/frame and bursts with its tip at the measured explosion row,
-        ## leaving the red debris bars and a short full-sky flash
+        in_water_c = state.stage == 3
+        in_water_bc = in_water_b | in_water_c
+        ## Rocket / shuttle, one shared object: floats in the water, then
+        ## ignites and climbs straight up 1px/frame. Stage 2 uses the short
+        ## float and bursts at the measured row into debris + sky flash;
+        ## stage 3 (read off the video) floats much longer as the drifting
+        ## launch pyramid and simply flies off the top, no debris
         rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
-        rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
+        ignite_age = jnp.where(
+            in_water_c,
+            jnp.array(self.consts.WC_SHUTTLE_FLOAT_FRAMES, dtype=jnp.int32),
+            jnp.array(self.consts.ROCKET_IGNITE_AGE, dtype=jnp.int32),
+        )
+        rocket_flying = rocket_age >= ignite_age
         next_rocket_x = jnp.where(
             state.rocket_active & (~rocket_flying) & (state.step_count % 4 == 0),
             state.rocket_x - 1,
@@ -1830,8 +1874,9 @@ class JaxJamesBond(
         )
         rocket_explodes = state.rocket_active & (
             next_rocket_y <= self.consts.ROCKET_EXPLODE_Y
-        )
-        next_rocket_active = state.rocket_active & (~rocket_explodes) & (
+        ) & in_water_b
+        rocket_off_top = state.rocket_active & in_water_c & (next_rocket_y <= 25)
+        next_rocket_active = state.rocket_active & (~rocket_explodes) & (~rocket_off_top) & (
             next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
         )
         ## Submarine: cruises left under water, a touch faster than the scroll
@@ -1877,6 +1922,23 @@ class JaxJamesBond(
         next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
         next_wb_flyer_x = jnp.where(rocket_explodes, next_rocket_x + 2, next_wb_flyer_x)
         debris_age = jnp.where(rocket_explodes, 0, debris_age)
+
+        ## Stage 3 steamship: crosses the surface in the last stretch of the
+        ## scene, right ahead of the bonus (video: ~13s before it pays out)
+        next_ship_x = jnp.where(
+            state.wc_ship_active & (state.step_count % 2 == 0),
+            state.wc_ship_x - 1,
+            state.wc_ship_x
+        )
+        next_ship_active = state.wc_ship_active & (
+            next_ship_x > self.consts.GAME_AREA_MIN_X - self.consts.WC_SHIP_WIDTH
+        )
+        spawn_ship = (
+            in_water_c & (~next_ship_active)
+            & (state.stage_step >= self.consts.STAGE_WATER_C_LENGTH - self.consts.WC_SHIP_LEAD_FRAMES)
+        )
+        next_ship_x = jnp.where(spawn_ship, jnp.array(self.consts.OBJECT_EXIT_X, dtype=jnp.int32), next_ship_x)
+        next_ship_active = next_ship_active | spawn_ship
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -1936,11 +1998,11 @@ class JaxJamesBond(
         in_water = state.stage == 1
         row_57_empty = (~jnp.any(next_helicopter_active)) & (~jnp.any(next_diamond_active))
         # Check whose turn it is to spawn
-        ## The red helicopter patrols the land and the first water scene but
-        ## the later scenes retire it (the video shows the pink flyer and the
-        ## small red heli there instead); the diamond keeps floating through
-        spawn_diamond = row_57_empty & (state.spawn_diamond_next | (state.stage >= 2))
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (state.stage <= 1)
+        ## The helicopter patrols land, water A and the purple scene (where
+        ## the video shows it as the small red heli); only stage 2 retires
+        ## it in favour of the pink flyer. The diamond floats through all
+        spawn_diamond = row_57_empty & (state.spawn_diamond_next | (state.stage == 2))
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (state.stage != 2)
         ## Measured ~46 frame gap between passes: park the timer at full
         ## while one is flying, count down while the sky is empty
         satellite_respawn_timer = jnp.where(
@@ -1962,31 +2024,42 @@ class JaxJamesBond(
             jnp.array(self.consts.SCUBA_RESPAWN_FRAMES, dtype=jnp.int32),
             jnp.maximum(state.scuba_respawn_timer - 1, 0),
         )
-        ## Stage-2 spawners: each object enters on its own staggered breather
-        ## so the roster stays mixed (same parked-timer pattern as above)
-        def waterb_spawner(active, timer, gap):
+        ## Late-scene spawners: each object enters on its own staggered
+        ## breather so the roster stays mixed (parked-timer pattern again).
+        ## The rocket/shuttle and the submarine live in stages 2 AND 3 (the
+        ## video shows the sub cruising the purple scene too); the pink
+        ## flyer is stage 2 only, stage 3 gets the red helicopter instead
+        def waterb_spawner(active, timer, gap, in_scene):
             next_timer = jnp.where(
-                active | (~in_water_b),
+                active | (~in_scene),
                 jnp.array(gap, dtype=jnp.int32),
                 jnp.maximum(timer - 1, 0),
             )
-            spawn = in_water_b & (~active) & (next_timer == 0)
+            spawn = in_scene & (~active) & (next_timer == 0)
             return spawn, next_timer
 
         spawn_rocket, rocket_timer = waterb_spawner(
-            next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
+            next_rocket_active, state.rocket_timer,
+            self.consts.ROCKET_RESPAWN_FRAMES, in_water_bc)
         next_rocket_active = next_rocket_active | spawn_rocket
         next_rocket_x = jnp.where(spawn_rocket, self.consts.ROCKET_SPAWN_X, next_rocket_x)
-        next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y)
+        next_rocket_y = jnp.where(
+            spawn_rocket,
+            ## stage 2 rests low in the water, the stage-3 pyramid a bit higher
+            jnp.where(in_water_c, self.consts.WC_SHUTTLE_Y, self.consts.ROCKET_Y),
+            next_rocket_y
+        )
         rocket_age = jnp.where(spawn_rocket, 0, rocket_age)
 
         spawn_submarine, submarine_timer = waterb_spawner(
-            next_submarine_active, state.submarine_timer, self.consts.SUBMARINE_RESPAWN_FRAMES)
+            next_submarine_active, state.submarine_timer,
+            self.consts.SUBMARINE_RESPAWN_FRAMES, in_water_bc)
         next_submarine_active = next_submarine_active | spawn_submarine
         next_submarine_x = jnp.where(spawn_submarine, self.consts.SCUBA_SPAWN_X, next_submarine_x)
 
         spawn_wb_heli, wb_heli_timer = waterb_spawner(
-            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES)
+            next_wb_heli_active, state.wb_heli_timer,
+            self.consts.WB_HELI_RESPAWN_FRAMES, in_water_b)
         next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
         next_wb_heli_x = jnp.where(spawn_wb_heli, self.consts.SCUBA_SPAWN_X, next_wb_heli_x)
 
@@ -2112,6 +2185,8 @@ class JaxJamesBond(
             sub_torp_x=next_torp_x,
             sub_torp_y=next_torp_y,
             sub_torp_active=next_torp_active,
+            wc_ship_x=next_ship_x,
+            wc_ship_active=next_ship_active,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -2708,23 +2783,30 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
-        ## The water scene has a solid gray sky where the land scene has black.
-        ## It goes UNDER the stars, because in the real game the stars still
-        ## twinkle on top of the gray.
-        raster = jax.lax.cond(
-            state.stage >= 1,
-            lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
-            lambda r: r,
+        ## Each scene has its own sky: land is black, the first two water
+        ## scenes a gray slab, the purple scene its periwinkle. The slab goes
+        ## UNDER the stars so they still twinkle on top of it.
+        raster = jax.lax.switch(
+            jnp.clip(state.stage, 0, 3),
+            [
+                lambda r: r,
+                lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
+                lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['water_sky']),
+                lambda r: self.jr.render_at_clipped(r, 8, 29, self.SHAPE_MASKS['wc_sky']),
+            ],
             raster,
         )
         raster = self._render_stars(raster, state)
-        ## Terrain follows the scene: dry land in stage 0, water in stage 1.
-        ## Before this the renderer always drew the ground, so the whole water
-        ## scene was played on a picture of the road.
-        raster = jax.lax.cond(
-            state.stage == 0,
-            lambda r: self._render_ground(r, state),
-            lambda r: self._render_water(r, state),
+        ## Terrain follows the scene: dry land, the blue water of the first
+        ## two water scenes, or the purple scene's navy water with clouds
+        raster = jax.lax.switch(
+            jnp.clip(state.stage, 0, 3),
+            [
+                lambda r: self._render_ground(r, state),
+                lambda r: self._render_water(r, state),
+                lambda r: self._render_water(r, state),
+                lambda r: self._render_water_c(r, state),
+            ],
             raster,
         )
 
@@ -2744,6 +2826,16 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_bullets(raster, state)
         ## After the bullets so the green recolor overdraws the normal bolt
         raster = self._render_sinking_bolt(raster, state)
+        ## Same overdraw trick for the purple scene: its heli bomb is the
+        ## little red pill from the video, not the yellow bar
+        raster = jax.lax.cond(
+            (state.stage == 3) & state.helicopter_bomb_active,
+            lambda r: self.jr.render_at_clipped(
+                r, state.helicopter_bomb_x, state.helicopter_bomb_y,
+                self.SHAPE_MASKS['bomb_red']),
+            lambda r: r,
+            raster,
+        )
 
         ## Render life counter
         raster = self.jr.render_indicator(raster, 9, 184, state.lives, self.SHAPE_MASKS['life'], 16, 3) ## TODO: Maybe 5 like in ALE?
@@ -2785,6 +2877,27 @@ class JamesBondRenderer(JAXGameRenderer):
             158,
             self.SHAPE_MASKS['seabed_water'],
         )
+
+    def _render_water_c(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the purple scene: navy water, green seabed, drifting clouds
+        and, near the scene's end, the steamship on the surface. All colors
+        and positions were measured off the longplay video."""
+
+        raster = self.jr.render_at_clipped(raster, 8, 121, self.SHAPE_MASKS['wc_water'])
+        raster = self.jr.render_at_clipped(raster, 0, 158, self.SHAPE_MASKS['wc_seabed'])
+        ## Three clouds drifting slowly left, wrapping around the sky
+        drift = state.stage_step // 8
+        for (cx, cy) in ((20, 33), (90, 47), (140, 60)):
+            x = (cx - drift) % 176 - 16
+            raster = self.jr.render_at_clipped(raster, x, cy, self.SHAPE_MASKS['cloud'])
+        raster = jax.lax.cond(
+            state.wc_ship_active,
+            lambda r: self.jr.render_at_clipped(
+                r, state.wc_ship_x, self.consts.WC_SHIP_Y, self.SHAPE_MASKS['ship']),
+            lambda r: r,
+            raster,
+        )
+        return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the twinkling star field, alternating between the two frames."""
@@ -2877,11 +2990,17 @@ class JamesBondRenderer(JAXGameRenderer):
             1
         )
 
-        draw_fn = lambda r: self.jr.render_at_clipped(
+        ## The purple scene shows the helicopter as the small red heli seen
+        ## in the video; everywhere else it is the usual two-frame sprite
+        draw_fn = lambda r: jax.lax.cond(
+            state.stage == 3,
+            lambda rr: self.jr.render_at_clipped(
+                rr, state.helicopter_x, state.helicopter_y,
+                self.SHAPE_MASKS['heli_red']),
+            lambda rr: self.jr.render_at_clipped(
+                rr, state.helicopter_x, state.helicopter_y,
+                self.SHAPE_MASKS['helicopter'][sprite_idx]),
             r,
-            state.helicopter_x,
-            state.helicopter_y,
-            self.SHAPE_MASKS['helicopter'][sprite_idx]
         )
 
         return jax.lax.cond(state.helicopter_active, draw_fn, lambda r: r, raster)
@@ -3004,7 +3123,19 @@ class JamesBondRenderer(JAXGameRenderer):
             ),
             jnp.array(8, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
         )
-        raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
+        ## The shared rocket slot wears three faces: the stage-2 rocket, the
+        ## stage-3 pyramid while floating, and the flame version once it
+        ## has ignited and climbs
+        shuttle_burning = state.rocket_age >= self.consts.WC_SHUTTLE_FLOAT_FRAMES
+        raster = one(raster,
+                     state.rocket_active & (state.stage != 3),
+                     state.rocket_x, state.rocket_y, 'rocket')
+        raster = one(raster,
+                     state.rocket_active & (state.stage == 3) & (~shuttle_burning),
+                     state.rocket_x, state.rocket_y, 'shuttle')
+        raster = one(raster,
+                     state.rocket_active & (state.stage == 3) & shuttle_burning,
+                     state.rocket_x, state.rocket_y, 'shuttle_fire')
         raster = one(raster, state.submarine_active, state.submarine_x,
                      jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32), 'submarine')
         raster = one(raster, state.wb_heli_active, state.wb_heli_x,
