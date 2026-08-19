@@ -486,7 +486,6 @@ class JamesBondObservation:
 
     player: ObjectObservation
     diamonds: ObjectObservation
-    player_velocity: jnp.ndarray
     helicopters: ObjectObservation
     satellites: ObjectObservation
     scubas: ObjectObservation
@@ -766,12 +765,6 @@ class JaxJamesBond(
                 "diamonds": spaces.get_object_space(
                     n=None, screen_size=screen_size
                 ),
-                "player_velocity": spaces.Box(
-                    low=jnp.array([-10.0, -20.0], dtype=jnp.float32),
-                    high=jnp.array([10.0, 20.0], dtype=jnp.float32),
-                    shape=(2,),
-                    dtype=jnp.float32,
-                ),
                 "helicopters": spaces.get_object_space(
                     n=None, screen_size=screen_size
                 ),
@@ -912,9 +905,6 @@ class JaxJamesBond(
         )
         return JamesBondObservation(
             player=player,
-            player_velocity=jnp.stack([state.player_vx, state.player_vy]).astype( ## TODO: Does observation need this or can we remove it?
-                jnp.float32
-            ),
             diamonds=diamonds,
             helicopters=helicopters,
             satellites=satellites,
