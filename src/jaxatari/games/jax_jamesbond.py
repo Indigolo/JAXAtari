@@ -90,8 +90,8 @@ def get_default_asset_config() -> tuple:
             {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
             {'name': 'flyer_red', 'type': 'single', 'file': 'flyer_red.npy'},
             {'name': 'sky_flash', 'type': 'single', 'file': 'sky_flash.npy'}, ## whole sky flashes gray on the burst
-            ## Third water scene ("purple" scene), everything extracted from a
-            ## longplay video of the real game frame by frame: periwinkle sky
+            ## The purple scene (4th scene, stage index 3), everything taken
+            ## from a longplay video of the real game: periwinkle sky
             ## with clouds, navy water, launching shuttles, the red heli, and
             ## the steamship that ends the scene
             {'name': 'wc_sky', 'type': 'single', 'file': 'wc_sky.npy'},
@@ -306,7 +306,9 @@ class JamesBondConstants(struct.PyTreeNode):
     ## dies before the surface. Measured harmless, pure theatre
     SUB_TORPEDO_PERIOD: int = struct.field(pytree_node=False, default=400)
 
-    ## Third water scene (stage 3), all behavior read off the longplay video:
+    ## The purple scene -- the FOURTH scene overall, stage index 3 (careful
+    ## when talking about it: in 1-indexed speak it comes AFTER stage 3).
+    ## All behavior read off the longplay video:
     ## the launch-pad pyramids drift in the water for a while, then ignite
     ## and climb into the sky exactly like the stage-2 rocket -- same object,
     ## different sprite and a much longer float. The small red helicopter
@@ -467,7 +469,7 @@ class JamesBondState:
     sub_torp_x: chex.Array
     sub_torp_y: chex.Array
     sub_torp_active: chex.Array
-    ## Third water scene: the steamship that crosses ahead of the bonus
+    ## Purple scene (4th scene): the steamship that crosses ahead of the bonus
     wc_ship_x: chex.Array
     wc_ship_active: chex.Array
     collected_diamond: chex.Array
