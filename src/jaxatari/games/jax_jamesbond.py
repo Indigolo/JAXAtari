@@ -253,6 +253,22 @@ class JamesBondConstants(struct.PyTreeNode):
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132)
     WATER_RADIOACTIVE_Y: int = struct.field(pytree_node=False, default=127) ## depth where the bolt goes radioactive
 
+    ## Stage progression, forward only, cycling 0->1->2->3->0. The land and
+    ## first-water lengths were measured in ALE on the test branch; the later
+    ## two were timed off a longplay video (water B ~14s, water C ~96s).
+    ## Completing any water scene pays the 5000 point bonus (seen in the
+    ## video: 600->5600, 8100->13200, 16600->21600).
+    STAGE_LAND_LENGTH: int = struct.field(pytree_node=False, default=4454)
+    STAGE_WATER_A_LENGTH: int = struct.field(pytree_node=False, default=4435)
+    STAGE_WATER_B_LENGTH: int = struct.field(pytree_node=False, default=840)
+    STAGE_WATER_C_LENGTH: int = struct.field(pytree_node=False, default=5760)
+    SCORE_STAGE_BONUS: int = struct.field(pytree_node=False, default=5000)
+    ## Playtest knob: JB_START_STAGE=2 python scripts/play.py -g jamesbond
+    ## drops a fresh game straight into that scene (read once at import)
+    START_STAGE: int = struct.field(
+        pytree_node=False, default=int(os.environ.get("JB_START_STAGE", "0"))
+    )
+
     ## Water scene satellite: fires when its belly is this far to the RIGHT
     ## of the player's hull, checked at discrete moments, never from behind
     SATELLITE_DROP_AHEAD_MIN: int = struct.field(pytree_node=False, default=1)
@@ -321,6 +337,7 @@ class JamesBondState:
     score: chex.Array
     step_count: chex.Array
     stage: chex.Array
+    stage_step: chex.Array ## frames into the current scene
     hit_cooldown: chex.Array ## TODO: What for?
     diamond_x: chex.Array
     diamond_y: chex.Array
@@ -470,7 +487,8 @@ class JaxJamesBond(
             lives=jnp.array(self.consts.MAX_LIVES, dtype=jnp.int32),
             score=jnp.array(0, dtype=jnp.int32),
             step_count=jnp.array(0, dtype=jnp.int32),
-            stage=jnp.array(0, dtype=jnp.int32),
+            stage=jnp.array(self.consts.START_STAGE, dtype=jnp.int32),
+            stage_step=jnp.array(0, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.array(0, dtype=jnp.int32),
             diamond_y=jnp.array(0, dtype=jnp.int32),
@@ -753,26 +771,43 @@ class JaxJamesBond(
     def _stage_step(
         self, state: JamesBondState
     ) -> JamesBondState:
+        """Advance the scene clock, roll to the next scene when it is due.
 
-        lives_lost = self.consts.MAX_LIVES - state.lives
+        Forward only, cycling land -> water A -> water B -> water C -> land.
+        The old version recomputed the stage from step_count with a lives
+        threshold, which sent the game BACK to land whenever a life was
+        lost mid-water; the longplay video shows scenes only ever advance,
+        each completed water scene paying the 5000 point bonus.
+        """
 
-        new_stage = jnp.where( ## TODO: add transition to stage 3
-            state.step_count > 3000 + lives_lost * 1000,
-            1,
-            0
+        stage_step = state.stage_step + 1
+        stage_length = jnp.select(
+            [state.stage == 0, state.stage == 1, state.stage == 2],
+            [
+                jnp.array(self.consts.STAGE_LAND_LENGTH, dtype=jnp.int32),
+                jnp.array(self.consts.STAGE_WATER_A_LENGTH, dtype=jnp.int32),
+                jnp.array(self.consts.STAGE_WATER_B_LENGTH, dtype=jnp.int32),
+            ],
+            jnp.array(self.consts.STAGE_WATER_C_LENGTH, dtype=jnp.int32),
         )
+        switched = stage_step >= stage_length
+        new_stage = jnp.where(switched, (state.stage + 1) % 4, state.stage)
+        stage_step = jnp.where(switched, 0, stage_step)
+        ## Completed WATER scenes pay the bonus; leaving land does not
+        bonus = jnp.logical_and(switched, state.stage >= 1)
 
         ## Scene handover: clear the objects that belong to the old terrain
         ## so pits don't leak into the water and a stale splash can't kill
         ## the car back on land. The satellite keeps flying, only its laser
         ## and per-pass counter start fresh.
-        switched = new_stage != state.stage
 
         def park(v, park_value):
             return jnp.where(switched, jnp.array(park_value, dtype=v.dtype), v)
 
         return state.replace(
             stage = new_stage,
+            stage_step=stage_step,
+            score=state.score + bonus.astype(jnp.int32) * self.consts.SCORE_STAGE_BONUS,
             pit_active=park(state.pit_active, False),
             scuba_active=park(state.scuba_active, False),
             scuba_age=park(state.scuba_age, 0),
@@ -1629,7 +1664,11 @@ class JaxJamesBond(
             [
                 self.step_player_stage_two,
                 self.step_player_stage_two,
-                self.step_player_stage_three_placeholder,
+                ## The later water scenes drive the same boat with the same
+                ## water physics, so they share the controller (the old
+                ## placeholder froze the player solid in stage 2)
+                self.step_player_stage_two,
+                self.step_player_stage_two,
             ],
             (state, atari_action)
         )
