@@ -90,6 +90,7 @@ def get_default_asset_config() -> tuple:
             },
 
             {'name': 'life', 'type': 'single', 'file': 'car_life.npy'},
+            {'name': 'oil_rig', 'type': 'group', 'files': ['oil_rig.npy', 'oil_rig.npy']},
 
             {
                 'name': 'score_digits', 'type': 'digits',
@@ -290,6 +291,9 @@ class JamesBondConstants(struct.PyTreeNode):
     ## Oil rig, sprite is a static 16x22
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
     OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
+    OIL_RIG_APPEAR_FRAME: int = struct.field(pytree_node=False, default=420) ## frames into the water scene before the rig shows
+    OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
+    OIL_RIG_STRIKE_FRAMES: int = struct.field(pytree_node=False, default=75) ## brief bright flash length
 
     ## Second water scene (after the dock bonus): darker water and a fresh
     ## enemy roster, all sprites cropped from real ALE frames. The floating
@@ -1916,16 +1920,19 @@ class JaxJamesBond(
             splash_age < self.consts.SPLASH_LIFETIME_FRAMES
         )
 
-        # Oil rig (Scroll left)
-        ## Measured: the rig drifts left 1px every 4th frame
-        next_oil_rig_x = jnp.where(
-            state.step_count % 4 == 3,
-            state.oil_rig_x - 1,
-            state.oil_rig_x
-        )
+        # Oil rig: stationary. Active purely as a frame window -- it is
+        ## glimpsed in the sky flash for a few frames, then gone. Computed
+        ## directly from step_count so spawn/despawn can't miss each other.
+        next_oil_rig_x = state.oil_rig_x
         next_oil_rig_y = state.oil_rig_y
-        oil_rig_on_screen = next_oil_rig_x >= (self.consts.GAME_AREA_MAX_X - self.consts.OIL_RIG_WIDTH)
-        next_oil_rig_active = state.oil_rig_active & oil_rig_on_screen
+        oil_rig_window = jnp.logical_and(
+            state.stage == 1,
+            jnp.logical_and(
+                state.step_count >= self.consts.OIL_RIG_APPEAR_FRAME,
+                state.step_count < self.consts.OIL_RIG_APPEAR_FRAME + self.consts.OIL_RIG_FLASH_FRAMES,
+            ),
+        )
+        next_oil_rig_active = oil_rig_window
 
         # Second water scene roster (stage 2)
         in_water_b = state.stage == 2
@@ -2161,18 +2168,16 @@ class JaxJamesBond(
         ##    self.consts.OIL_RIG_FLASH_FRAMES, # Placeholder for N frames
         ##    next_oil_rig_visible_timer
         ##)
-        # Apply new active status, position coordinates for spawned oil rig
-        trigger_oil_rig_spawn = False # Replace with specific level-end condition
-        spawn_oil_rig = trigger_oil_rig_spawn & (~next_oil_rig_active)
-        next_oil_rig_active = next_oil_rig_active | spawn_oil_rig
+        # Position the rig at its fixed spot whenever the window (set above)
+        ## has it active. The window alone owns active/inactive now.
         next_oil_rig_x = jnp.where(
-            spawn_oil_rig,
-            self.consts.OBJECT_SPAWN_X_FAR, # here i use x position as diamonds
+            next_oil_rig_active,
+            jnp.array(120, dtype=jnp.int32), # on-screen resting spot
             next_oil_rig_x
         )
         next_oil_rig_y = jnp.where(
-            spawn_oil_rig,
-            99,
+            next_oil_rig_active,
+            108,
             next_oil_rig_y
         )
         # Enemies
@@ -2945,6 +2950,20 @@ class JamesBondRenderer(JAXGameRenderer):
             lambda r: r,
             raster,
         )
+        ## Bright full-screen flash for the first few frames as the oil rig
+        ## arrives -- a quick strike, while the rig itself lingers after.
+        rig_flash = jnp.logical_and(
+            state.stage == 1,
+            jnp.logical_and(
+                state.step_count >= self.consts.OIL_RIG_APPEAR_FRAME,
+                state.step_count < self.consts.OIL_RIG_APPEAR_FRAME + self.consts.OIL_RIG_STRIKE_FRAMES,
+            ),
+        )
+        def _rig_flash(r):
+            pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
+            size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
+            return self.jr.draw_rects(r, pos, size, 24)  # id 24 = light grey (142,142,142)
+        raster = jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
         raster = self._render_stars(raster, state)
         ## Terrain follows the scene: dry land in stage 0, water in stage 1
         raster = jax.lax.cond(
@@ -2963,6 +2982,7 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_scuba(raster, state)
         raster = self._render_splash(raster, state)
         raster = self._render_waterb(raster, state)
+        raster = self._render_oil_rig(raster, state)
 
         raster = self._render_bullets(raster, state)
         raster = self._render_sinking_bolt(raster, state)
@@ -3132,6 +3152,14 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
 
+    def _render_oil_rig(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Draw the oil rig sprite while it is active (glimpsed in the flash)."""
+        def draw_fn(r):
+            return self.jr.render_at_clipped(
+                r, state.oil_rig_x, state.oil_rig_y, self.SHAPE_MASKS['oil_rig'][0]
+            )
+        return jax.lax.cond(state.oil_rig_active, draw_fn, lambda r: r, raster)
+
     def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the second water scene roster."""
 
@@ -3171,18 +3199,10 @@ class JamesBondRenderer(JAXGameRenderer):
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the twinkling star field, alternating between the two frames."""
-
-        ## The real stars fade through gray shades over many frames; a slow
-        ## alternation of the two extracted phases reads as twinkling
-        ## without making the sky vibrate.
-        sprite_idx = jnp.where((state.step_count // 8) % 2 == 0, 0, 1)
-        return self.jr.render_at_clipped(
-            raster,
-            4,  # x - the sprites were re-extracted from ALE columns 4..156
-            0,  # y
-            self.SHAPE_MASKS['stars'][sprite_idx],
-        )
+        """Scattered star field across the whole sky; two frames alternate
+        slowly for a gentle twinkle."""
+        idx = jnp.where((state.step_count // 24) % 2 == 0, 0, 1)
+        return self.jr.render_at_clipped(raster, 4, 34, self.SHAPE_MASKS['stars'][idx])
 
     def _render_background(self, raster: jnp.ndarray) -> jnp.ndarray: ## TODO: Turn to ground renderer
         """Draw the placeholder play area."""
