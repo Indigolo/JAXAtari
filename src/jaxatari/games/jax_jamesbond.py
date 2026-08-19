@@ -44,7 +44,10 @@ def get_default_asset_config() -> tuple:
             },
             {
                 'name': 'helicopter_melee', 'type': 'group',
-                'files': ['helicopter_shot_1.npy', 'helicopter_shot_2.npy'] ## TODO: Add others
+                ## The searchlight sweep table indexes sprites 0..14, so the
+                ## whole extracted sequence has to be loaded (the group loader
+                ## pads the differing widths)
+                'files': [f'helicopter_shot_{i}.npy' for i in range(1, 17)]
             },
             {
                 'name': 'pit', 'type': 'group',
@@ -2435,6 +2438,10 @@ class JamesBondRenderer(JAXGameRenderer):
         raster = self._render_diamond(raster, state)
         raster = self._render_pit(raster, state)
         raster = self._render_helicopter(raster, state)
+        ## The searchlight sweep was implemented but never drawn -- in the
+        ## real game (checked against a longplay video) the yellow beam is
+        ## clearly visible whenever the helicopter slows mid-screen
+        raster = self._render_helicopter_melee(raster, state)
         raster = self._render_satellite(raster, state)
         raster = self._render_scuba(raster, state)
         raster = self._render_splash(raster, state)
@@ -2618,7 +2625,9 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS['helicopter_melee'][melee_idx]
         )
 
-        return jax.lax.cond(melee_idx != -1, draw_fn, lambda r: r, raster) ## TODO: Maybe add logical and with helicopter_active
+        return jax.lax.cond(
+            (melee_idx != -1) & state.helicopter_active, draw_fn, lambda r: r, raster
+        )
 
     def _render_satellite(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
 
