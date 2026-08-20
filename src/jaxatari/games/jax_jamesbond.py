@@ -584,8 +584,12 @@ class JaxJamesBond(
     def __init__(self, consts: JamesBondConstants = None):
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
-            ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            ## scene through scripts/play.py without touching code. The
+            ## default has to be 0: the real game starts on land, and a
+            ## default of 1 meant every fresh episode began in the water, so
+            ## the player got the water bullet arc instead of the air shot
+            ## (and it broke the two bullet/diamond tests, which assume land)
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 3))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
