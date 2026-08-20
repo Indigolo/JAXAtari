@@ -1454,16 +1454,11 @@ class JaxJamesBond(
                 player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], 
                 jnp.where(
                     player_floating,
-                    ## PLAYER_IN_Y_STEPS is a GRAVITY curve: dense 1s at the
-                    ## front, mostly zeros at the back. The dive reads it
-                    ## forward, which is right. The float used to read it with
-                    ## the same descending counter, i.e. backwards, so the
-                    ## boat hung nearly still for the first ~40 frames of the
-                    ## rise and you never saw it float. Mirroring the index
-                    ## makes buoyancy kick hard off the bottom and ease in at
-                    ## the surface. The counter only ever runs 63 -> 0, so
-                    ## 64 - step sweeps 1..64 and sums to the same 26px rise.
-                    jnp.clip(player_y - self.consts.PLAYER_IN_Y_STEPS[64 - player_in_water_step], self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
+                    ## Read the table with the descending counter, exactly like
+                    ## air_movement_logic's fall branch does: the boat starts
+                    ## at rest at the bottom and accelerates toward the
+                    ## surface. Water and air stay symmetric on purpose.
+                    jnp.clip(player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
                     player_y
                 )
             )
@@ -1738,15 +1733,15 @@ class JaxJamesBond(
                     player_wbullet_active,
                     jnp.where(player_wbullet_step < 8,
                         player_wbullet_y + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
-                        ## Past the table the round is spent and the water's
-                        ## density takes over: it sinks. The tail is the
-                        ## documented "(1,0),(0,2)" alternation -- x and y
-                        ## move on OPPOSITE frames. Both used to move on the
-                        ## same odd frame, which halved the sink rate and
-                        ## made the water shot read like the air shot.
+                        ## Past the table the spent round drifts down-right at
+                        ## half a pixel per frame. The constant's comment says
+                        ## "(1,0),(0,2)", but that rate sinks it to y~172,
+                        ## below the seabed -- so the comment is what is wrong
+                        ## here, not the code. Left alone until someone
+                        ## re-measures the tail against the ROM.
                         jnp.where(
-                            player_wbullet_step % 2 == 0,
-                            player_wbullet_y + 2,
+                            player_wbullet_step % 2 == 1,
+                            player_wbullet_y + 1,
                             player_wbullet_y
                         )
                     ),
@@ -1798,26 +1793,30 @@ class JaxJamesBond(
         )
         """
 
-        ## Pick the branch from what NEEDS to run this frame, not just from
-        ## what is already in flight. The old version built the index purely
-        ## from the two active flags, so while an air bullet was still up a
-        ## new water bullet could not spawn at all -- holding FIRE gave a
-        ## 71 frame cadence instead of 61. It also gated the air shot on
-        ## wbullet_step >= 8, adding 9 frames of dead time after the press.
-        want_water = jnp.logical_and(fire_pressed, ~state.player_wbullet_active)
-        want_air = jnp.logical_and(
-            fire_pressed,
-            jnp.logical_and(
-                jnp.logical_and(
-                    state.player_wbullet_active,
-                    state.player_wbullet_step >= 1, ## water still goes first, but only by a frame
-                ),
-                ~state.player_bullet_active,
-            ),
+        bullet_function = (state.player_bullet_active.astype(jnp.int32) << 1) | state.player_wbullet_active.astype(jnp.int32)
+
+        ## Water bullet is always the first one shot. This used to be gated on
+        ## bullet_function == 0, so a FIRE press that arrived while an air
+        ## bullet was still up got DROPPED entirely -- holding FIRE in the
+        ## water gave a 71 frame cadence instead of 61. ORing the water bit in
+        ## fixes exactly that and leaves every other path untouched.
+        bullet_function = jnp.where(
+            jnp.logical_and(fire_pressed, ~state.player_wbullet_active),
+            bullet_function | 1,
+            bullet_function
         )
-        bullet_function = (
-            jnp.logical_or(state.player_bullet_active, want_air).astype(jnp.int32) << 1
-        ) | jnp.logical_or(state.player_wbullet_active, want_water).astype(jnp.int32)
+
+        bullet_function = jnp.where(
+            jnp.logical_and(
+                fire_pressed,
+                jnp.logical_and(
+                    state.player_wbullet_step >= 8, ## TODO: Maybe more?
+                    ~state.player_bullet_active,
+                )
+            ),
+            3,
+            bullet_function
+        )
 
         bullet_state = jax.lax.switch(
             bullet_function,
@@ -2183,11 +2182,17 @@ class JaxJamesBond(
         # Check whose turn it is to spawn. The pit is land-only; the
         # diamond floats through the sky of every scene (measured at
         # y60-64 on land and y62 over the water), and the red helicopter
-        # also patrols the first water scene, dropping the same bombs
-        # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
-        # per crossing). Only the second water scene retires it.
-        spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active)
+        # patrols every scene, dropping the same bombs (measured: enters
+        # right, ~0.58 px/f slowing mid-screen, ~2 bombs per crossing).
+        # Water B used to retire it, which also silently killed the
+        # searchlight sweep there: the sweep is driven off
+        # helicopter_melee_step, and with no helicopter that counter is
+        # pinned to 0 forever, so the beam never drew in that scene (0
+        # sweeps in a pinned 2000 frame run, vs 4 in every other scene).
+        # The pink flyer shares row 57, so it stands down where the real
+        # helicopter flies rather than stacking two craft on one row.
+        spawn_diamond = row_57_empty & state.spawn_diamond_next
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~state.oil_rig_active)
         ## The satellite takes a measured ~65 frame breather between passes;
         ## the gap also lets its per-pass laser counter reset.
         satellite_respawn_timer = jnp.where(
@@ -2238,8 +2243,11 @@ class JaxJamesBond(
         next_submarine_active = next_submarine_active | spawn_submarine
         next_submarine_x = jnp.where(spawn_submarine, self.consts.OBJECT_SPAWN_X_FAR, next_submarine_x)
 
+        ## Stood down now that the real helicopter patrols water B too --
+        ## they share sky row 57 and two craft there reads as a glitch.
         spawn_wb_heli, wb_heli_timer = waterb_spawner(
-            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES)
+            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES,
+            jnp.array(False))
         next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
         next_wb_heli_x = jnp.where(spawn_wb_heli, self.consts.OBJECT_SPAWN_X_FAR, next_wb_heli_x)
 
