@@ -349,7 +349,7 @@ class JamesBondConstants(struct.PyTreeNode):
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
     REWARD_ENEMY: float = struct.field(pytree_node=False, default=2.0)
-    REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0)
+    REWARD_HIT_ENEMY: float = struct.field(pytree_node=False, default=-1.0) ## TODO: REMOVE
     REWARD_LOST_LIFE: float = struct.field(pytree_node=False, default=-1.0)
 
     ASSET_CONFIG: tuple = struct.field(pytree_node=False, default_factory=get_default_asset_config)
@@ -474,8 +474,6 @@ class JamesBondState:
     sub_torp_x: chex.Array
     sub_torp_y: chex.Array
     sub_torp_active: chex.Array
-    collected_diamond: chex.Array
-    hit_enemy: chex.Array
     fired_bullet: chex.Array
     key: chex.PRNGKey
 
@@ -501,8 +499,6 @@ class JamesBondObservation:
 class JamesBondInfo:
     """Debug/event info for smoke tests and future gameplay systems."""
 
-    collected_diamond: jnp.ndarray
-    hit_enemy: jnp.ndarray
     fired_bullet: jnp.ndarray
     score: jnp.ndarray
     lives: jnp.ndarray
@@ -648,8 +644,6 @@ class JaxJamesBond(
             sub_torp_x=jnp.array(-1, dtype=jnp.int32),
             sub_torp_y=jnp.array(-1, dtype=jnp.int32),
             sub_torp_active=jnp.array(False, dtype=jnp.bool_),
-            collected_diamond=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
-            hit_enemy=jnp.array(False, dtype=jnp.bool_), ## TODO: Does this reset?
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
             key=state_key,
         )
@@ -672,8 +666,6 @@ class JaxJamesBond(
                 ## animation too, and every render animation and scroll
                 ## offset derives from this counter.
                 step_count=state.step_count + 1,
-                collected_diamond=jnp.array(False, dtype=jnp.bool_),
-                hit_enemy=jnp.array(False, dtype=jnp.bool_),
                 hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
                 fired_bullet=atari_action == Action.FIRE,
             )
@@ -681,7 +673,7 @@ class JaxJamesBond(
             state = self._step_player(state, atari_action)
             state = self._update_objects(state)
             state = self._update_enemy_bombs(state)
-            state = self._check_collisions_placeholder(state)
+            state = self._resolve_collisions(state)
             return state
 
         def frozen_step(state: JamesBondState) -> JamesBondState:
@@ -744,7 +736,7 @@ class JaxJamesBond(
         state = state.replace(key=next_key)
 
         observation = self._get_observation(state)
-        reward = self._calculate_reward_placeholder(previous_state, state)
+        reward = self._get_reward(previous_state, state)
         done = self._is_done(state)
         info = self._get_info(state)
 
@@ -948,8 +940,6 @@ class JaxJamesBond(
     @partial(jax.jit, static_argnums=(0,))
     def _get_info(self, state: JamesBondState) -> JamesBondInfo:
         return JamesBondInfo(
-            collected_diamond=state.collected_diamond,
-            hit_enemy=state.hit_enemy,
             fired_bullet=state.fired_bullet,
             score=state.score,
             lives=state.lives,
@@ -2477,22 +2467,6 @@ class JaxJamesBond(
             splash_age=splash_age,
         )
 
-    def _check_collisions_placeholder(self, state: JamesBondState) -> JamesBondState: ## TODO: what is this for?
-        # Future diamond, enemy, bullet, and life collision logic belongs here.
-        state = state.replace(
-            collected_diamond=jnp.array(False, dtype=jnp.bool_),
-            hit_enemy=jnp.array(False, dtype=jnp.bool_),
-        )
-        return self._resolve_collisions(state)
-
-    def _calculate_reward_placeholder(
-        self, previous_state: JamesBondState, state: JamesBondState
-    ) -> chex.Array:
-        if False:
-            del previous_state, state
-            return jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
-        return self._get_reward(previous_state, state)
-
     def _is_done(self, state: JamesBondState) -> chex.Array:
         return self._get_done(state)
 
@@ -2549,7 +2523,6 @@ class JaxJamesBond(
         return state.replace(
             satellite_active=jnp.logical_and(state.satellite_active, ~hit),
             score=state.score + hit.astype(jnp.int32) * self.consts.SCORE_ENEMY,
-            hit_enemy=jnp.logical_or(state.hit_enemy, hit),
             player_bullet_active=player_bullet_active,
             player_bullet_x=park(player_bullet_active, state.player_bullet_x),
             player_bullet_y=park(player_bullet_active, state.player_bullet_y),
@@ -2603,7 +2576,6 @@ class JaxJamesBond(
 
         return state.replace(
             score=state.score + rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET,
-            hit_enemy=jnp.logical_or(state.hit_enemy, rocket_hit),
             rocket_active=jnp.logical_and(state.rocket_active, ~rocket_hit),
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
@@ -2772,7 +2744,7 @@ class JaxJamesBond(
             ),
         )
 
-    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
+    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState: ## TODO: Change this to true score gaining function
         """Collect active diamonds that overlap a player shot.
 
         Both shots count: the land round and the water anti-air round fly
@@ -2841,7 +2813,6 @@ class JaxJamesBond(
             player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
             ## Only add points for actual hits, not every frame the bullet flies
             score=state.score + collected_count * self.consts.SCORE_DIAMOND,
-            collected_diamond=jnp.logical_or(state.collected_diamond, collected_any),
         )
 
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -2863,24 +2834,28 @@ class JaxJamesBond(
     ) -> chex.Array:
         """Calculate reward from collision-driven state transitions."""
 
-        score_gained = jnp.maximum(state.score - previous_state.score, 0)
-        diamonds_collected = jnp.where(
-            state.collected_diamond,
-            jnp.floor_divide(score_gained, self.consts.SCORE_DIAMOND),
-            0,
-        )
-        lives_lost = jnp.maximum(previous_state.lives - state.lives, 0)
+        return state.score - previous_state.score
 
-        return (
-            jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
-            + diamonds_collected.astype(jnp.float32) * self.consts.REWARD_DIAMOND
-            + lives_lost.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE
-        )
+        """
+        score_gained = jnp.maximum(state.score - previous_state.score, 0)
+            diamonds_collected = jnp.where(
+                state.collected_diamond, ## TODO: REMOVE
+                jnp.floor_divide(score_gained, self.consts.SCORE_DIAMOND),
+                0,
+            )
+            lives_lost = jnp.maximum(previous_state.lives - state.lives, 0)
+    
+            return (
+                jnp.array(self.consts.REWARD_STEP, dtype=jnp.float32)
+                + diamonds_collected.astype(jnp.float32) * self.consts.REWARD_DIAMOND
+                + lives_lost.astype(jnp.float32) * self.consts.REWARD_LOST_LIFE
+            )
+        """
 
     def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
             state.lives <= 0,
-            state.step_count >= self.consts.MAX_EPISODE_STEPS,
+            state.stage >= 4, ## TODO: Change / Take into account
         )
 
 
