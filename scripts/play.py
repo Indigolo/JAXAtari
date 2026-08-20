@@ -153,8 +153,9 @@ def main():
     parser.add_argument(
         "--fps",
         type=int,
-        default=30,
-        help="Frame rate for the game.",
+        default=60,
+        help="Frame rate for the game (the 2600 ran at 60Hz, and the games' "
+             "per-frame tables are measured against that).",
     )
     parser.add_argument(
         "-v",

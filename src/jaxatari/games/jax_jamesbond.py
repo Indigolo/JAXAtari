@@ -1401,12 +1401,15 @@ class JaxJamesBond(
             )
         )
         
+        ## Table indices 64..70 are all zero, so the boat is already at its
+        ## deepest at step 64: turning around there removes a 17 frame hang
+        ## at the bottom of the dive without changing the depth reached.
         player_floating = jnp.where(
             jnp.logical_and(
-                jnp.logical_or(player_floating, player_in_water_step >= 71), 
+                jnp.logical_or(player_floating, player_in_water_step >= 64),
                 player_y != self.consts.PLAYER_INIT_Y
-            ), 
-            True, 
+            ),
+            True,
             player_floating ## TODO: or False?
         )
         
@@ -1438,8 +1441,8 @@ class JaxJamesBond(
         )
         
         player_in_water_step = jnp.where( ## Start immediately floating up when reaching the bottom of the dive
-            player_in_water_step >= 71, 
-            63, 
+            player_in_water_step >= 64,
+            63,
             player_in_water_step
         )
 
@@ -1450,8 +1453,17 @@ class JaxJamesBond(
                 player_diving, 
                 player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], 
                 jnp.where(
-                    player_floating, 
-                    jnp.clip(player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_water_step], self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
+                    player_floating,
+                    ## PLAYER_IN_Y_STEPS is a GRAVITY curve: dense 1s at the
+                    ## front, mostly zeros at the back. The dive reads it
+                    ## forward, which is right. The float used to read it with
+                    ## the same descending counter, i.e. backwards, so the
+                    ## boat hung nearly still for the first ~40 frames of the
+                    ## rise and you never saw it float. Mirroring the index
+                    ## makes buoyancy kick hard off the bottom and ease in at
+                    ## the surface. The counter only ever runs 63 -> 0, so
+                    ## 64 - step sweeps 1..64 and sums to the same 26px rise.
+                    jnp.clip(player_y - self.consts.PLAYER_IN_Y_STEPS[64 - player_in_water_step], self.consts.GAME_AREA_MAX_Y, 210), ## TODO: 210 is arbitrary
                     player_y
                 )
             )
@@ -1726,9 +1738,15 @@ class JaxJamesBond(
                     player_wbullet_active,
                     jnp.where(player_wbullet_step < 8,
                         player_wbullet_y + self.consts.PLAYER_WATER_BULLET_STEPS[player_wbullet_step][1],
+                        ## Past the table the round is spent and the water's
+                        ## density takes over: it sinks. The tail is the
+                        ## documented "(1,0),(0,2)" alternation -- x and y
+                        ## move on OPPOSITE frames. Both used to move on the
+                        ## same odd frame, which halved the sink rate and
+                        ## made the water shot read like the air shot.
                         jnp.where(
-                            player_wbullet_step % 2 == 1,
-                            player_wbullet_y + 1,
+                            player_wbullet_step % 2 == 0,
+                            player_wbullet_y + 2,
                             player_wbullet_y
                         )
                     ),
@@ -1780,29 +1798,26 @@ class JaxJamesBond(
         )
         """
 
-        bullet_function = (state.player_bullet_active.astype(jnp.int32) << 1) | state.player_wbullet_active.astype(jnp.int32)
-
-        bullet_function = jnp.where(
-            bullet_function == 0,
-            jnp.where(
-                fire_pressed,
-                1, ## Water bullet is always the first one shot
-                0
-            ),
-            bullet_function
-        )
-
-        bullet_function = jnp.where(
+        ## Pick the branch from what NEEDS to run this frame, not just from
+        ## what is already in flight. The old version built the index purely
+        ## from the two active flags, so while an air bullet was still up a
+        ## new water bullet could not spawn at all -- holding FIRE gave a
+        ## 71 frame cadence instead of 61. It also gated the air shot on
+        ## wbullet_step >= 8, adding 9 frames of dead time after the press.
+        want_water = jnp.logical_and(fire_pressed, ~state.player_wbullet_active)
+        want_air = jnp.logical_and(
+            fire_pressed,
             jnp.logical_and(
-                fire_pressed,
                 jnp.logical_and(
-                    state.player_wbullet_step >= 8, ## TODO: Maybe more?
-                    ~state.player_bullet_active,
-                )
+                    state.player_wbullet_active,
+                    state.player_wbullet_step >= 1, ## water still goes first, but only by a frame
+                ),
+                ~state.player_bullet_active,
             ),
-            3,
-            bullet_function
         )
+        bullet_function = (
+            jnp.logical_or(state.player_bullet_active, want_air).astype(jnp.int32) << 1
+        ) | jnp.logical_or(state.player_wbullet_active, want_water).astype(jnp.int32)
 
         bullet_state = jax.lax.switch(
             bullet_function,
