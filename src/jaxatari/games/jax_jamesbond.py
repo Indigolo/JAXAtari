@@ -292,6 +292,12 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
     OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
     OIL_RIG_APPEAR_FRAME: int = struct.field(pytree_node=False, default=420) ## frames into the water scene before the rig shows
+    OIL_RIG_SEQ_TOTAL: int = struct.field(pytree_node=False, default=120)     ## total frames of the appear-right/gap/appear-left sequence
+    OIL_RIG_SEQ_RIGHT_END: int = struct.field(pytree_node=False, default=90)  ## seq value where the RIGHT phase ends
+    OIL_RIG_SEQ_LEFT_START: int = struct.field(pytree_node=False, default=75) ## seq value where the LEFT phase begins
+    OIL_RIG_RIGHT_X: int = struct.field(pytree_node=False, default=120)       ## right appear column
+    OIL_RIG_LEFT_X: int = struct.field(pytree_node=False, default=45)         ## left appear column (player is to its right)
+    OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=8)      ## flash length (frames) at each appearance
     OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
     OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
     OIL_RIG_STRIKE_FRAMES: int = struct.field(pytree_node=False, default=75) ## brief bright flash length
@@ -459,6 +465,8 @@ class JamesBondState:
     oil_rig_x: chex.Array
     oil_rig_y: chex.Array
     oil_rig_active: chex.Array
+    oil_rig_seq: chex.Array      ## countdown driving the appear-right / gap / appear-left sequence (0 = idle)
+    diamond_shot: chex.Array     ## True the frame a diamond is shot; triggers the rig next frame
     ## Second water scene roster
     rocket_x: chex.Array
     rocket_y: chex.Array
@@ -631,6 +639,8 @@ class JaxJamesBond(
             oil_rig_x=jnp.array(-1, dtype=jnp.int32),
             oil_rig_y=jnp.array(-1, dtype=jnp.int32),
             oil_rig_active=jnp.array(False, dtype=jnp.bool_),
+            oil_rig_seq=jnp.array(0, dtype=jnp.int32),
+            diamond_shot=jnp.array(False, dtype=jnp.bool_),
             #oil_rig_visible_timer=jnp.array(0, dtype=jnp.int32),
             rocket_x=jnp.array(-1, dtype=jnp.int32),
             rocket_y=jnp.array(-1, dtype=jnp.int32),
@@ -1926,16 +1936,37 @@ class JaxJamesBond(
         # Oil rig: stationary. Active purely as a frame window -- it is
         ## glimpsed in the sky flash for a few frames, then gone. Computed
         ## directly from step_count so spawn/despawn can't miss each other.
-        next_oil_rig_x = state.oil_rig_x
         next_oil_rig_y = state.oil_rig_y
-        oil_rig_window = jnp.logical_and(
-            state.stage == 1,
-            jnp.logical_and(
-                state.step_count >= self.consts.OIL_RIG_APPEAR_FRAME,
-                state.step_count < self.consts.OIL_RIG_APPEAR_FRAME + self.consts.OIL_RIG_FLASH_FRAMES,
-            ),
+        ## Oil rig is triggered by SHOOTING THE DIAMOND (not a frame timer).
+        ## diamond_shot (set last frame in the diamond collision) starts the
+        ## sequence: appear on the RIGHT with a flash, disappear, then reappear
+        ## on the LEFT near the player. Only (re)start when idle (seq == 0).
+        in_water = state.stage == 1
+        start_seq = jnp.logical_and(
+            jnp.logical_and(state.diamond_shot, in_water),
+            state.oil_rig_seq == 0,
         )
-        next_oil_rig_active = oil_rig_window
+        oil_rig_seq = jnp.where(
+            start_seq,
+            jnp.array(self.consts.OIL_RIG_SEQ_TOTAL, dtype=jnp.int32),
+            jnp.maximum(state.oil_rig_seq - 1, 0),
+        )
+        ## Phase boundaries (counting DOWN from OIL_RIG_SEQ_TOTAL):
+        ##   TOTAL .. RIGHT_END  -> visible on the RIGHT (+ flash)
+        ##   RIGHT_END .. LEFT_START -> hidden (the disappear gap)
+        ##   LEFT_START .. 1     -> visible on the LEFT, near the player
+        on_right = jnp.logical_and(oil_rig_seq <= self.consts.OIL_RIG_SEQ_TOTAL,
+                                   oil_rig_seq > self.consts.OIL_RIG_SEQ_RIGHT_END)
+        on_left = jnp.logical_and(oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
+                                  oil_rig_seq > 0)
+        next_oil_rig_active = jnp.logical_or(on_right, on_left)
+        next_oil_rig_x = jnp.where(
+            on_right,
+            jnp.array(self.consts.OIL_RIG_RIGHT_X, dtype=jnp.int32),
+            jnp.where(on_left,
+                      jnp.array(self.consts.OIL_RIG_LEFT_X, dtype=jnp.int32),
+                      state.oil_rig_x),
+        )
 
         # Second water scene roster (stage 2)
         in_water_b = state.stage == 2
@@ -2173,11 +2204,6 @@ class JaxJamesBond(
         ##)
         # Position the rig at its fixed spot whenever the window (set above)
         ## has it active. The window alone owns active/inactive now.
-        next_oil_rig_x = jnp.where(
-            next_oil_rig_active,
-            jnp.array(64, dtype=jnp.int32), # on-screen resting spot
-            next_oil_rig_x
-        )
         next_oil_rig_y = jnp.where(
             next_oil_rig_active,
             108,
@@ -2254,6 +2280,7 @@ class JaxJamesBond(
             oil_rig_x=next_oil_rig_x,
             oil_rig_y=next_oil_rig_y,
             oil_rig_active=next_oil_rig_active,
+            oil_rig_seq=oil_rig_seq,
             rocket_x=next_rocket_x,
             rocket_y=next_rocket_y,
             rocket_active=next_rocket_active,
@@ -2861,6 +2888,7 @@ class JaxJamesBond(
             return jnp.where(active, v, -1)
 
         return state.replace(
+            diamond_shot=collected_any,
             diamond_active = jnp.logical_and( ## TODO: change diamond x and y?
                 state.diamond_active, ~collected
             ),
@@ -2983,12 +3011,20 @@ class JamesBondRenderer(JAXGameRenderer):
         )
         ## Bright full-screen flash for the first few frames as the oil rig
         ## arrives -- a quick strike, while the rig itself lingers after.
+        ## Flash fires at BOTH appearances: the first few frames of the RIGHT
+        ## phase and the first few frames of the LEFT phase, keyed to oil_rig_seq.
+        _strike = self.consts.OIL_RIG_STRIKE_LEN
+        flash_right = jnp.logical_and(
+            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_TOTAL,
+            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_TOTAL - _strike,
+        )
+        flash_left = jnp.logical_and(
+            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
+            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_LEFT_START - _strike,
+        )
         rig_flash = jnp.logical_and(
             state.stage == 1,
-            jnp.logical_and(
-                state.step_count >= self.consts.OIL_RIG_APPEAR_FRAME,
-                state.step_count < self.consts.OIL_RIG_APPEAR_FRAME + self.consts.OIL_RIG_STRIKE_FRAMES,
-            ),
+            jnp.logical_or(flash_right, flash_left),
         )
         def _rig_flash(r):
             pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
