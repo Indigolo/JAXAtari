@@ -292,6 +292,7 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
     OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
     OIL_RIG_APPEAR_FRAME: int = struct.field(pytree_node=False, default=420) ## frames into the water scene before the rig shows
+    OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
     OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
     OIL_RIG_STRIKE_FRAMES: int = struct.field(pytree_node=False, default=75) ## brief bright flash length
 
@@ -1827,8 +1828,20 @@ class JaxJamesBond(
             state.stage
         )
 
-        new_stage = jnp.where( ## TODO: Correct logic? Optimize
-            jnp.logical_and(new_stage == 1, state.score >= 5000),
+        ## Landing on TOP of the oil rig ends the water scene and advances
+        ## to the next stage (real-game level-end condition). Side contact is
+        ## handled separately as a lethal collision in _resolve_oil_rig_collision.
+        rig_over_deck = jnp.logical_and(
+            state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x,
+            state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH,
+        )
+        rig_on_top = jnp.logical_and(
+            state.player_y + self.consts.PLAYER_COLLISION_HEIGHT >= state.oil_rig_y,
+            state.player_y <= state.oil_rig_y + self.consts.OIL_RIG_TOP_LAND_MARGIN,
+        )
+        landed_on_rig = state.oil_rig_active & rig_over_deck & rig_on_top
+        new_stage = jnp.where(
+            jnp.logical_and(new_stage == 1, landed_on_rig),
             2,
             new_stage
         )
@@ -2162,7 +2175,7 @@ class JaxJamesBond(
         ## has it active. The window alone owns active/inactive now.
         next_oil_rig_x = jnp.where(
             next_oil_rig_active,
-            jnp.array(120, dtype=jnp.int32), # on-screen resting spot
+            jnp.array(64, dtype=jnp.int32), # on-screen resting spot
             next_oil_rig_x
         )
         next_oil_rig_y = jnp.where(
@@ -2484,6 +2497,7 @@ class JaxJamesBond(
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_scuba_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
+        state = self._resolve_oil_rig_collision(state)
         return state
 
     def _resolve_bullet_satellite_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -2536,6 +2550,48 @@ class JaxJamesBond(
             player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
             player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
             player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+        )
+
+    def _resolve_oil_rig_collision(self, state: JamesBondState) -> JamesBondState:
+        """Side contact with the oil rig is lethal; landing on top is handled
+        in _update_stage (it advances the scene, so it must NOT also kill).
+        """
+        overlap = jnp.logical_and(
+            state.oil_rig_active,
+            _aabb_overlap(
+                state.player_x, state.player_y,
+                self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
+                state.oil_rig_x, state.oil_rig_y,
+                self.consts.OIL_RIG_WIDTH, self.consts.OIL_RIG_HEIGHT,
+            ),
+        )
+        on_top = jnp.logical_and(
+            jnp.logical_and(
+                state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x,
+                state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH,
+            ),
+            jnp.logical_and(
+                state.player_y + self.consts.PLAYER_COLLISION_HEIGHT >= state.oil_rig_y,
+                state.player_y <= state.oil_rig_y + self.consts.OIL_RIG_TOP_LAND_MARGIN,
+            ),
+        )
+        side_hit = jnp.logical_and(overlap, jnp.logical_not(on_top))
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(side_hit, can_take_damage)
+        return state.replace(
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            death_timer=jnp.where(
+                took_damage,
+                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.death_timer,
+            ),
         )
 
     def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
