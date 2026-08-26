@@ -2519,65 +2519,12 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
-        state = self._resolve_bullet_satellite_collisions(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_scuba_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
         state = self._resolve_oil_rig_collision(state)
         return state
-
-    def _resolve_bullet_satellite_collisions(self, state: JamesBondState) -> JamesBondState:
-        """Shooting down the satellite pays the manual's enemy score.
-
-        Either shot destroys it; the round is spent on the hit and the
-        satellite re-enters later through its normal respawn breather.
-        (Note: ALE intercept scans in the measured scenes showed bullets
-        passing through without reward -- this follows the manual's
-        scoring table instead, per the project's call.)
-        """
-
-        def shot_overlap(bx, by):
-            ## The full sprite box, not the inset player-contact box: a
-            ## round that visibly clips the satellite should count.
-            return _aabb_overlap(
-                bx, by,
-                self.consts.BULLET_WIDTH,
-                self.consts.BULLET_HEIGHT,
-                state.satellite_x,
-                state.satellite_y,
-                self.consts.SATELLITE_ENEMY_WIDTH,
-                self.consts.SATELLITE_ENEMY_HEIGHT,
-            )
-
-        air_hit = jnp.logical_and(
-            jnp.logical_and(state.satellite_active, state.player_bullet_active),
-            shot_overlap(state.player_bullet_x, state.player_bullet_y),
-        )
-        water_hit = jnp.logical_and(
-            jnp.logical_and(state.satellite_active, state.player_wbullet_active),
-            shot_overlap(state.player_wbullet_x, state.player_wbullet_y),
-        )
-        hit = jnp.logical_or(air_hit, water_hit)
-
-        def park(active, v):
-            return jnp.where(active, v, -1)
-
-        player_bullet_active = jnp.logical_and(state.player_bullet_active, ~air_hit)
-        player_wbullet_active = jnp.logical_and(state.player_wbullet_active, ~water_hit)
-
-        return state.replace(
-            satellite_active=jnp.logical_and(state.satellite_active, ~hit),
-            score=state.score + hit.astype(jnp.int32) * self.consts.SCORE_ENEMY,
-            player_bullet_active=player_bullet_active,
-            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
-            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
-            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
-            player_wbullet_active=player_wbullet_active,
-            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
-            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
-            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
-        )
 
     def _resolve_oil_rig_collision(self, state: JamesBondState) -> JamesBondState:
         """Side contact with the oil rig is lethal; landing on top is handled
@@ -2680,7 +2627,7 @@ class JaxJamesBond(
             ),
         )
 
-    def _resolve_scuba_player_collisions(self, state: JamesBondState) -> JamesBondState:
+    def _resolve_scuba_player_collisions(self, state: JamesBondState) -> JamesBondState: ## TODO: Correct?
         """One life of damage from the two water hazards.
 
         Neither can be shot (the player's only round is the up-forward
@@ -2840,7 +2787,7 @@ class JaxJamesBond(
         +50 in every scene (verified in ALE on land and over the water).
         """
 
-        air_overlap = _aabb_overlap(
+        overlap = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
             self.consts.BULLET_WIDTH,
@@ -2850,45 +2797,23 @@ class JaxJamesBond(
             self.consts.DIAMOND_COLLISION_WIDTH,
             self.consts.DIAMOND_COLLISION_HEIGHT,
         )
-        water_overlap = _aabb_overlap(
-            state.player_wbullet_x,
-            state.player_wbullet_y,
-            self.consts.BULLET_WIDTH,
-            self.consts.BULLET_HEIGHT,
-            state.diamond_x,
-            state.diamond_y,
-            self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT,
-        )
 
-        ## Gate per shot: only active diamonds can be hit, and only while
-        ## the respective shot itself is active. Each shot that scored is
-        ## the one consumed -- the review caught the water hit clearing the
-        ## land bullet instead of its own.
-        air_collected = jnp.logical_and(
+        collected = jnp.logical_and(
             jnp.logical_and(state.diamond_active, state.player_bullet_active),
-            air_overlap,
+            overlap,
         )
-        water_collected = jnp.logical_and(
-            jnp.logical_and(state.diamond_active, state.player_wbullet_active),
-            water_overlap,
-        )
-        collected = jnp.logical_or(air_collected, water_collected)
-        collected_any = jnp.any(collected)
-        collected_count = jnp.sum(collected.astype(jnp.int32))
 
         player_bullet_active = jnp.logical_and(
-            state.player_bullet_active, jnp.logical_not(jnp.any(air_collected))
+            state.player_bullet_active, ~collected
         )
-        player_wbullet_active = jnp.logical_and(
-            state.player_wbullet_active, jnp.logical_not(jnp.any(water_collected))
-        )
+
+        new_score = state.score + collected * self.consts.SCORE_DIAMOND
 
         def park(active, v):
             return jnp.where(active, v, -1)
 
         return state.replace(
-            diamond_shot=collected_any,
+            diamond_shot=collected,
             diamond_active = jnp.logical_and( ## TODO: change diamond x and y?
                 state.diamond_active, ~collected
             ),
@@ -2896,12 +2821,7 @@ class JaxJamesBond(
             player_bullet_step=park(player_bullet_active, state.player_bullet_step),
             player_bullet_x=park(player_bullet_active, state.player_bullet_x),
             player_bullet_y=park(player_bullet_active, state.player_bullet_y),
-            player_wbullet_active=player_wbullet_active,
-            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
-            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
-            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
-            ## Only add points for actual hits, not every frame the bullet flies
-            score=state.score + collected_count * self.consts.SCORE_DIAMOND,
+            score=new_score
         )
 
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
