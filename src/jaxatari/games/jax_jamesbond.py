@@ -356,6 +356,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_CHECK_PERIOD: int = struct.field(pytree_node=False, default=30) ## check moments ~10-60f apart in ALE
     SATELLITE_WATER_MAX_DROPS: int = struct.field(pytree_node=False, default=2) ## 1-2 per pass observed
     SATELLITE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=46) ## measured 44-48 frame gap
+    SATELLITE_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=180) ## First satellite pass is delayed 180 frames after game start
 
     REWARD_STEP: float = struct.field(pytree_node=False, default=0.0)
     REWARD_DIAMOND: float = struct.field(pytree_node=False, default=1.0)
@@ -553,7 +554,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -600,7 +601,7 @@ class JaxJamesBond(
             pit_x=jnp.array(0, dtype=jnp.int32),
             pit_y=jnp.array(0, dtype=jnp.int32),
             pit_active=jnp.array(False, dtype=jnp.bool_),
-            spawn_diamond_next=jnp.array(True, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional?
+            spawn_diamond_next=jnp.array(False, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional? Setting False here will make helicopter spawn first, which is true?
             ## TODO: Change / Remove after observation and collision enemy variables have been changed; or else will cause fail tests
             enemy_x=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
             enemy_y=jnp.zeros((self.consts.MAX_ENEMIES,), dtype=jnp.float32),
@@ -627,7 +628,7 @@ class JaxJamesBond(
                 self.consts.SATELLITE_LASER_DROP_PERIOD, dtype=jnp.int32
             ),
             satellite_lasers_dropped=jnp.array(0, dtype=jnp.int32),
-            satellite_respawn_timer=jnp.array(0, dtype=jnp.int32),
+            satellite_respawn_timer=jnp.array(self.consts.SATELLITE_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
             scuba_x=jnp.array(-1, dtype=jnp.int32),
             scuba_y=jnp.array(-1, dtype=jnp.int32),
             scuba_active=jnp.array(False, dtype=jnp.bool_),
@@ -2103,7 +2104,9 @@ class JaxJamesBond(
         # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
         # per crossing). Only the second water scene retires it.
         spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active)
+        ## The helicopter spawning will be delayed by 75 frames from initial state
+        helicopter_delay_passed = state.step_count >= 75
+        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active) & (helicopter_delay_passed)
         ## The satellite takes a measured ~65 frame breather between passes;
         ## the gap also lets its per-pass laser counter reset.
         satellite_respawn_timer = jnp.where(
@@ -2113,8 +2116,10 @@ class JaxJamesBond(
         )
         ## The satellite patrols the land and the first water scene; the
         ## second water scene never shows it (22k frame scan).
+        ## The first satellite is delayed by 180 frames
+        satellite_delay_passed = state.step_count > self.consts.SATELLITE_INITIAL_SPAWN_DELAY
         can_spawn_satellite = (
-            (~next_satellite_active) & (satellite_respawn_timer == 0) & (state.stage <= 1) & (~state.oil_rig_active)
+            (~next_satellite_active) & (satellite_respawn_timer == 0) & (satellite_delay_passed) & (state.stage <= 1) & (~state.oil_rig_active)
         )
         can_spawn_pit = (~next_pit_active) & on_land ## Only spawn when the previous pit left the screen
 
@@ -2172,9 +2177,11 @@ class JaxJamesBond(
             next_scuba_y
         )
         scuba_age = jnp.where(spawn_scuba, 0, scuba_age)
+        # Check if either helicopter or diamond is spawning on this frame
+        spawn_occurred = jnp.logical_or(spawn_diamond, spawn_helicopter)
         # Flip the turn flag ONLY if a spawn is happening on this frame
         next_spawn_diamond_next = jnp.where(
-            row_57_empty,
+            spawn_occurred,
             ~state.spawn_diamond_next, ## Swap to the other object for next time
             state.spawn_diamond_next ## Keep it the same while they are flying
         )
