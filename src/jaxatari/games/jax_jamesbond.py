@@ -272,6 +272,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SCUBA_HEIGHT: int = struct.field(pytree_node=False, default=20)
     SCUBA_SPAWN_X: int = struct.field(pytree_node=False, default=155) ## right screen edge
     SCUBA_SPAWN_Y: int = struct.field(pytree_node=False, default=129) ## body below the surface row (ALE 131, our rows sit 2 higher)
+    SCORE_SCUBA: int = struct.field(pytree_node=False, default=200)
     ## The deep swimmer's own clock (both clean tracked episodes of the
     ## 7x20 vertical diver ran 333 frames); the ~120 frame figure floating
     ## around belongs to the surface splash creature, not to him.
@@ -286,7 +287,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SPLASH_HEIGHT: int = struct.field(pytree_node=False, default=7)
     SPLASH_Y: int = struct.field(pytree_node=False, default=123) ## straddles the surface row
     SPLASH_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
-    SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=112) ## airborne above this is safe
+    SPLASH_SAFE_PLAYER_Y: int = struct.field(pytree_node=False, default=119) ## airborne above this is safe
     WATER_LASER_FLOOR: int = struct.field(pytree_node=False, default=132) ## bolt sinks this deep before detonating
     ## Oil rig, sprite is a static 16x22
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
@@ -554,7 +555,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2526,6 +2527,7 @@ class JaxJamesBond(
         """Run all collision systems after movement and object updates."""
 
         state = self._resolve_player_bullet_collisions(state)
+        state = self._resolve_player_wbullet_collisions(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_scuba_player_collisions(state)
@@ -2831,16 +2833,56 @@ class JaxJamesBond(
             score=new_score
         )
 
+    def scuba_collisions_logic(self, state: JamesBondState) -> JamesBondState:
+
+        overlap = _aabb_overlap(
+            state.player_wbullet_x,
+            state.player_wbullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.scuba_x,
+            state.scuba_y,
+            self.consts.SCUBA_WIDTH,
+            self.consts.SCUBA_HEIGHT,
+        )
+
+        hit = jnp.logical_and(
+            jnp.logical_and(state.scuba_active, state.player_wbullet_active),
+            overlap,
+        )
+
+        player_wbullet_active = jnp.logical_and(
+            state.player_wbullet_active, ~hit
+        )
+
+        new_score = state.score + hit * self.consts.SCORE_SCUBA
+
+        def park(active, v):
+            return jnp.where(active, v, -1)
+
+        return state.replace(
+            scuba_active = jnp.logical_and(
+                state.scuba_active, ~hit
+            ),
+            player_wbullet_active=player_wbullet_active,
+            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
+            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
+            score=new_score
+        )
+    
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
-        ## In the original game the bullet passes straight through helicopters
-        ## and satellites without any visible response: the diamond is the
-        ## only object the player shots collide with, so only that check
-        ## runs, and only while either shot is in flight. (The review caught
-        ## the old gate checking only the land bullet, which made the water
-        ## shot's diamond collection dead code.)
         return lax.cond(
-            jnp.logical_or(state.player_bullet_active, state.player_wbullet_active),
+            state.player_bullet_active,
             self.collectible_collisions_logic,
+            lambda s: s,
+            state
+        )
+
+    def _resolve_player_wbullet_collisions(self, state: JamesBondState) -> JamesBondState:
+        return lax.cond(
+            state.player_wbullet_active,
+            self.scuba_collisions_logic,
             lambda s: s,
             state
         )
@@ -2871,7 +2913,7 @@ class JaxJamesBond(
     def _get_done(self, state: JamesBondState) -> chex.Array:
         return jnp.logical_or(
             state.lives <= 0,
-            state.stage >= 4, ## TODO: Change / Take into account
+            state.stage >= 3, ## TODO: Change / Take into account
         )
 
 
