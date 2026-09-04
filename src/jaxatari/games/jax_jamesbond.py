@@ -298,8 +298,9 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_SEQ_LEFT_START: int = struct.field(pytree_node=False, default=105) ## seq value where the LEFT phase begins
     OIL_RIG_RIGHT_X: int = struct.field(pytree_node=False, default=120)       ## right appear column
     OIL_RIG_LEFT_X: int = struct.field(pytree_node=False, default=45)         ## left appear column (player is to its right)
-    OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=8)      ## flash length (frames) at each appearance
-    OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=1000) ## rig can't appear until 1000+ steps into the water scene
+    OIL_RIG_Y: int = struct.field(pytree_node=False, default=100)             ## top-left y: deck at waterline, legs in water
+    OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=24)     ## flash length; also the rig visible window
+    OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=1500) ## rig can't appear until 1500+ steps into the water scene
     OIL_RIG_RIGHT_SLIDE: int = struct.field(pytree_node=False, default=12)    ## px the rig drifts left while visible on the right
     OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
     OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
@@ -469,6 +470,8 @@ class JamesBondState:
     oil_rig_x: chex.Array
     oil_rig_y: chex.Array
     oil_rig_active: chex.Array
+    oil_rig_visible: chex.Array  ## flash-only: rig is DRAWN only during the flash frames
+    oil_rig_done: chex.Array     ## latch: rig already appeared this water scene (blocks re-trigger)
     stage1_start_step: chex.Array   ## step_count at the moment the water scene (stage 1) began
     oil_rig_seq: chex.Array      ## countdown driving the appear-right / gap / appear-left sequence (0 = idle)
     diamond_shot: chex.Array     ## True the frame a diamond is shot; triggers the rig next frame
@@ -644,6 +647,8 @@ class JaxJamesBond(
             oil_rig_x=jnp.array(-1, dtype=jnp.int32),
             oil_rig_y=jnp.array(-1, dtype=jnp.int32),
             oil_rig_active=jnp.array(False, dtype=jnp.bool_),
+            oil_rig_visible=jnp.array(False, dtype=jnp.bool_),
+            oil_rig_done=jnp.array(False, dtype=jnp.bool_),
             stage1_start_step=jnp.array(0, dtype=jnp.int32),
             oil_rig_seq=jnp.array(0, dtype=jnp.int32),
             diamond_shot=jnp.array(False, dtype=jnp.bool_),
@@ -1873,9 +1878,11 @@ class JaxJamesBond(
         stage1_start_step = jnp.where(
             entering_stage1, state.step_count, state.stage1_start_step
         )
+        oil_rig_done_reset = jnp.where(entering_stage1, jnp.array(False, dtype=jnp.bool_), state.oil_rig_done)
         return state.replace(
             stage=new_stage,
             stage1_start_step=stage1_start_step,
+            oil_rig_done=oil_rig_done_reset,
             ## Land objects vanish at the shoreline
             helicopter_active=clear(state.helicopter_active, False),
             helicopter_melee_step=clear(state.helicopter_melee_step, 0),
@@ -1957,10 +1964,11 @@ class JaxJamesBond(
         in_water = state.stage == 1
         steps_into_stage1 = state.step_count - state.stage1_start_step
         past_delay = steps_into_stage1 >= self.consts.OIL_RIG_MIN_STAGE1_STEPS
+        diamond_shot_any = jnp.any(state.diamond_shot)
         start_seq = jnp.logical_and(
             jnp.logical_and(
-                jnp.logical_and(state.diamond_shot, in_water),
-                past_delay,
+                jnp.logical_and(diamond_shot_any, in_water),
+                jnp.logical_and(past_delay, jnp.logical_not(state.oil_rig_done)),
             ),
             state.oil_rig_seq == 0,
         )
@@ -1969,6 +1977,8 @@ class JaxJamesBond(
             jnp.array(self.consts.OIL_RIG_SEQ_TOTAL, dtype=jnp.int32),
             jnp.maximum(state.oil_rig_seq - 1, 0),
         )
+        oil_rig_seq = jnp.where(state.death_timer > 0, jnp.array(0, dtype=jnp.int32), oil_rig_seq)
+        oil_rig_done = jnp.logical_or(state.oil_rig_done, start_seq)
         ## Phase boundaries (counting DOWN from OIL_RIG_SEQ_TOTAL):
         ##   TOTAL .. RIGHT_END  -> visible on the RIGHT (+ flash)
         ##   RIGHT_END .. LEFT_START -> hidden (the disappear gap)
@@ -1978,6 +1988,14 @@ class JaxJamesBond(
         on_left = jnp.logical_and(oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
                                   oil_rig_seq > 0)
         next_oil_rig_active = jnp.logical_or(on_right, on_left)
+        ## Drawn ONLY during flash frames (first STRIKE_LEN of each phase),
+        ## so the move between right and left is never seen (no teleport look).
+        _sl = self.consts.OIL_RIG_STRIKE_LEN
+        _fr = jnp.logical_and(oil_rig_seq <= self.consts.OIL_RIG_SEQ_TOTAL,
+                              oil_rig_seq > self.consts.OIL_RIG_SEQ_TOTAL - _sl)
+        _fl = jnp.logical_and(oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
+                              oil_rig_seq > self.consts.OIL_RIG_SEQ_LEFT_START - _sl)
+        next_oil_rig_visible = jnp.logical_and(next_oil_rig_active, jnp.logical_or(_fr, _fl))
         ## During the RIGHT phase the rig is visible and drifts a little to
         ## the left before it disappears. Progress through the right phase:
         ##   0 at the start (seq == TOTAL) .. 1 at the end (seq == RIGHT_END)
@@ -2236,7 +2254,7 @@ class JaxJamesBond(
         ## has it active. The window alone owns active/inactive now.
         next_oil_rig_y = jnp.where(
             next_oil_rig_active,
-            108,
+            self.consts.OIL_RIG_Y,
             next_oil_rig_y
         )
         # Enemies
@@ -2310,6 +2328,8 @@ class JaxJamesBond(
             oil_rig_x=next_oil_rig_x,
             oil_rig_y=next_oil_rig_y,
             oil_rig_active=next_oil_rig_active,
+            oil_rig_visible=next_oil_rig_visible,
+            oil_rig_done=oil_rig_done,
             oil_rig_seq=oil_rig_seq,
             stage1_start_step=state.stage1_start_step,
             rocket_x=next_rocket_x,
@@ -3198,7 +3218,7 @@ class JamesBondRenderer(JAXGameRenderer):
             return self.jr.render_at_clipped(
                 r, state.oil_rig_x, state.oil_rig_y, self.SHAPE_MASKS['oil_rig'][0]
             )
-        return jax.lax.cond(state.oil_rig_active, draw_fn, lambda r: r, raster)
+        return jax.lax.cond(state.oil_rig_visible, draw_fn, lambda r: r, raster)
 
     def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the second water scene roster."""
