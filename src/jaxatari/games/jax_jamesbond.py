@@ -278,11 +278,16 @@ class JamesBondConstants(struct.PyTreeNode):
     ## around belongs to the surface splash creature, not to him.
     SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333)
     SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
-    ## When a satellite bomb comes down and the diver is in the water near
-    ## the player, HE takes the radioactive state instead of the bomb.
-    ## Measured from play: the diver only reacts when he is within this
-    ## many pixels of the boat horizontally; further out and the bomb goes
-    ## radioactive at the surface as usual.
+    ## Who (if anyone) goes radioactive, from playtesting:
+    ##   no diver on screen              -> the BOMB goes radioactive
+    ##   diver on screen, boat near him  -> the DIVER goes radioactive
+    ##   diver on screen, boat far away  -> NOBODY does; the bomb simply
+    ##                                      disappears on contact with the water
+    ## So a diver anywhere on screen is enough to stop the bomb glowing;
+    ## lighting the diver up additionally needs the boat within this many
+    ## pixels of him horizontally. Reaching him takes deliberate driving:
+    ## he enters at x=155 and drifts left 0.25px/frame, the boat is capped
+    ## at x=73, so idle play leaves a ~100px gap and nothing lights up.
     SCUBA_RADIOACTIVE_RANGE: int = struct.field(pytree_node=False, default=40)
     SCUBA_RADIOACTIVE_DELAY: int = struct.field(pytree_node=False, default=30) ## he turns a moment after the bomb reaches him
     SCUBA_RADIOACTIVE_FRAMES: int = struct.field(pytree_node=False, default=120) ## how long he stays radioactive
@@ -2446,9 +2451,13 @@ class JaxJamesBond(
         already_radioactive = jnp.logical_or(state.splash_active, state.scuba_radioactive)
         free_slot = jnp.logical_not(already_radioactive)
 
+        ## The bomb only glows when the screen is CLEAR of divers. With a
+        ## diver anywhere on screen the bolt just dies on contact with the
+        ## water: either the diver takes the state (if the boat is near him)
+        ## or nothing does.
         spawn_splash = jnp.logical_and(
             jnp.logical_and(detonate, free_slot),
-            jnp.logical_not(scuba_in_range), ## no diver in range -> the bomb glows
+            jnp.logical_not(state.scuba_active),
         )
         refresh_splash = jnp.logical_and(detonate, state.splash_active)
         splash_x = jnp.where(
