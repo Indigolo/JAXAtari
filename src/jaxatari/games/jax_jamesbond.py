@@ -2530,7 +2530,7 @@ class JaxJamesBond(
         state = self._resolve_player_wbullet_collisions(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
-        state = self._resolve_scuba_player_collisions(state)
+        state = self._resolve_splash_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
         state = self._resolve_oil_rig_collision(state)
         return state
@@ -2636,30 +2636,13 @@ class JaxJamesBond(
             ),
         )
 
-    def _resolve_scuba_player_collisions(self, state: JamesBondState) -> JamesBondState: ## TODO: Correct?
-        """One life of damage from the two water hazards.
+    def _resolve_splash_player_collisions(self, state: JamesBondState) -> JamesBondState: ## TODO: Correct?
+        """One life of damage from the radioactive splash hazard.
 
-        Neither can be shot (the player's only round is the up-forward
-        anti-air shot), so both are purely the player's problem:
-        - The swimming diver's body sits below the surface, so a boat
-          riding on top floats past him; only a submerged boat that runs
-          into his box takes the hit.
-        - The laser splash explosion straddles the surface and kills on
-          near-contact (measured: within ~1px, submerged or afloat); only
-          a clearly airborne boat passes over it safely.
+        The laser splash explosion straddles the surface and kills on
+        near-contact (measured: within ~1px, submerged or afloat); only
+        a clearly airborne boat passes over it safely.
         """
-
-        diver_overlap = _aabb_overlap(
-            state.player_x,
-            state.player_y,
-            self.consts.PLAYER_COLLISION_WIDTH,
-            self.consts.PLAYER_COLLISION_HEIGHT,
-            state.scuba_x,
-            state.scuba_y,
-            self.consts.SCUBA_WIDTH,
-            self.consts.SCUBA_HEIGHT,
-        )
-        diver_hit = jnp.logical_and(state.scuba_active, diver_overlap)
 
         ## Splash: the measured kill window is boat_x in
         ## [splash_x - 9, splash_x + 19], plus an altitude gate
@@ -2672,21 +2655,19 @@ class JaxJamesBond(
             state.splash_active, jnp.logical_and(x_touch, low_enough)
         )
 
-        scuba_collision = jnp.logical_or(diver_hit, splash_hit)
         can_take_damage = state.hit_cooldown <= 0
-        took_damage = jnp.logical_and(scuba_collision, can_take_damage)
 
         return state.replace(
             lives=jnp.maximum(
-                0, state.lives - took_damage.astype(jnp.int32)
+                0, state.lives - splash_hit.astype(jnp.int32)
             ).astype(jnp.int32),
             hit_cooldown=jnp.where(
-                took_damage,
+                splash_hit,
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
                 state.hit_cooldown,
             ),
             death_timer=jnp.where(
-                took_damage,
+                splash_hit,
                 jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
                 state.death_timer,
             ),
