@@ -153,3 +153,41 @@ def test_depth_charge_sinks_water_b_submarine(env):
     state = _run(env, state, 3)
     assert not bool(state.submarine_active)
     assert int(state.score) == consts.SCORE_SUBMARINE_SHOT
+
+
+def test_water_b_debris_falls_to_the_waterline_like_daylight(env):
+    """Team decision: the water-B rocket follows the daylight lifecycle.
+    Unshot, it bursts; the bars fall to the waterline, float, vanish."""
+
+    consts = env.consts
+    state = _quiet(env)
+    state = state.replace(
+        rocket_active=state.rocket_active.at[0].set(True),
+        rocket_x=state.rocket_x.at[0].set(100),
+        rocket_y=state.rocket_y.at[0].set(consts.ROCKET_EXPLODE_Y + 1),
+        rocket_age=state.rocket_age.at[0].set(50),
+        rocket_launch_age=state.rocket_launch_age.at[0].set(10),
+    )
+    state = _run(env, state, 1)
+    assert not bool(state.rocket_active[0])
+    assert bool(state.wb_flyer_active[0])
+    state = _run(env, state, 20)
+    assert int(state.wb_flyer_y[0]) == consts.WB_FLYER_Y + 20
+    state = _run(env, state, consts.WC_DEBRIS_REST_Y - consts.WB_FLYER_Y - 20)
+    assert int(state.wb_flyer_y[0]) == consts.WC_DEBRIS_REST_Y
+    assert bool(state.wb_flyer_active[0])
+    state = _run(env, state, consts.WC_DEBRIS_REST_FRAMES + 2)
+    assert not bool(state.wb_flyer_active[0])
+
+
+def test_water_b_falling_debris_costs_a_life(env):
+    state = _quiet(env)
+    state = state.replace(
+        wb_flyer_active=state.wb_flyer_active.at[0].set(True),
+        wb_flyer_x=state.wb_flyer_x.at[0].set(int(state.player_x) + 2),
+        wb_flyer_y=state.wb_flyer_y.at[0].set(int(state.player_y) - 3),
+        wb_flyer_timer=state.wb_flyer_timer.at[0].set(0),
+    )
+    lives = int(state.lives)
+    state = _run(env, state, 2)
+    assert int(state.lives) == lives - 1

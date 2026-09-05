@@ -376,7 +376,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
-    DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120) ## red bars linger and drift
+    DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120) ## ALE-measured linger; unused since the bars now fall like the daylight ones
     SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=2) ## whole sky flashes gray on the burst
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
@@ -2381,29 +2381,27 @@ class JaxJamesBond(
         next_wb_heli_active = state.wb_heli_active & (
             next_wb_heli_x < self.consts.OBJECT_EXIT_X
         )
-        ## Rocket debris: the two red bars drift with the world. In water B
-        ## they linger where the rocket burst until their clock runs out;
-        ## in the daylight scene they fall 1px/frame back to the waterline
-        ## (the clock is held while falling), float there briefly, then go.
+        ## Rocket debris: the two red bars drift with the world and fall
+        ## 1px/frame back to the waterline (the clock is held while
+        ## falling), float there briefly as the sparkle, then go. Same
+        ## lifecycle in water B and the daylight scene (team decision --
+        ## the old ALE note had water B's bars lingering in the sky).
         debris_age = jnp.where(state.wb_flyer_active, state.wb_flyer_timer + 1, 0)
         next_wb_flyer_x = jnp.where(
             state.wb_flyer_active & scroll_tick,
             state.wb_flyer_x - 1,
             state.wb_flyer_x
         )
-        debris_falling = in_water_c & (state.wb_flyer_y < self.consts.WC_DEBRIS_REST_Y)
+        debris_falling = in_water_bc & (state.wb_flyer_y < self.consts.WC_DEBRIS_REST_Y)
         next_wb_flyer_y = jnp.where(
             state.wb_flyer_active & debris_falling,
             state.wb_flyer_y + 1,
             state.wb_flyer_y
         )
         debris_age = jnp.where(debris_falling, 0, debris_age)
-        debris_lifetime = jnp.where(
-            in_water_c,
-            self.consts.WC_DEBRIS_REST_FRAMES,
-            self.consts.DEBRIS_LIFETIME_FRAMES,
+        next_wb_flyer_active = state.wb_flyer_active & (
+            debris_age < self.consts.WC_DEBRIS_REST_FRAMES
         )
-        next_wb_flyer_active = state.wb_flyer_active & (debris_age < debris_lifetime)
         ## The burst hands over: rocket out, debris in centred on the burst column
         next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
         debris_offset = jnp.where(
@@ -3162,7 +3160,7 @@ class JaxJamesBond(
         rocket_value = jnp.where(in_water_c, self.consts.SCORE_ROCKET_SHOT, self.consts.SCORE_ROCKET)
         ## The anti-air shot also pops the falling / floating debris
         debris_hits = jnp.logical_and(
-            jnp.logical_and(in_water_c, state.player_bullet_active),
+            jnp.logical_and(in_scene, state.player_bullet_active),
             jnp.logical_and(
                 state.wb_flyer_active,
                 _aabb_overlap(
@@ -3232,7 +3230,7 @@ class JaxJamesBond(
             )
 
         debris_hit = jnp.logical_and(
-            in_water_c,
+            jnp.logical_or(state.stage == 2, in_water_c),
             jnp.any(jnp.logical_and(
                 state.wb_flyer_active,
                 touch(state.wb_flyer_x, state.wb_flyer_y,
@@ -3371,9 +3369,8 @@ class JaxJamesBond(
             touch(state.sub_torp_x, state.sub_torp_y,
                   self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT),
         )
-        ## Water B's red bars are rocket debris drifting far above the
-        ## jump apex: harmless wreckage there (the daylight scene's
-        ## falling debris is handled in _resolve_waterc_contacts).
+        ## The rocket debris (falling or floating) is handled together
+        ## with the other daylight-style contacts in _resolve_waterc_contacts.
 
         any_hit = rocket_hit | submarine_hit | heli_hit | shot_hit
         can_take_damage = state.hit_cooldown <= 0
@@ -4033,14 +4030,16 @@ class JamesBondRenderer(JAXGameRenderer):
             )
 
         ## The rocket burst flashes the whole sky gray for a frame or two
-        ## (water B only; no flash was visible in the daylight footage)
+        ## (water B only; no flash was visible in the daylight footage).
+        ## Keyed to the debris height: the bars fall 1px/frame from the
+        ## burst row, and their clock is held while they fall.
         raster = one(
             raster,
             jnp.logical_and(
                 state.stage == 2,
                 jnp.any(jnp.logical_and(
                     state.wb_flyer_active,
-                    state.wb_flyer_timer < self.consts.SKY_FLASH_FRAMES,
+                    state.wb_flyer_y < self.consts.WB_FLYER_Y + self.consts.SKY_FLASH_FRAMES,
                 )),
             ),
             jnp.array(4, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
@@ -4059,7 +4058,7 @@ class JamesBondRenderer(JAXGameRenderer):
         ## red / pink sparkle, its two dot patterns swapping every few
         ## frames (video); everywhere else the two red bars are drawn.
         splash_pose = (state.step_count // self.consts.WC_SPLASH_FLIP_FRAMES) % 2
-        debris_resting = in_water_c & (state.wb_flyer_y >= self.consts.WC_DEBRIS_REST_Y)
+        debris_resting = state.wb_flyer_y >= self.consts.WC_DEBRIS_REST_Y
         for slot in range(self.consts.WC_ROCKET_SLOTS):
             raster = one(raster, state.rocket_active[slot] & (~in_water_c),
                          state.rocket_x[slot], state.rocket_y[slot], 'rocket')
