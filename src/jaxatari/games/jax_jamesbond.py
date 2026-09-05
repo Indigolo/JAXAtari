@@ -82,8 +82,29 @@ def get_default_asset_config() -> tuple:
             {'name': 'death_flash', 'type': 'single', 'file': 'death_flash.npy'}, ## the sky's one-frame flash on a water death
             {'name': 'rocket', 'type': 'single', 'file': 'rocket.npy'},
             {'name': 'submarine', 'type': 'single', 'file': 'submarine.npy'},
-            {'name': 'heli_pink', 'type': 'single', 'file': 'heli_pink.npy'},
+            ## Water B's pink ball (the old "pink helicopter"): a 9x11
+            ## sphere block-sampled from the longplay, solid and striped
+            ## poses alternating in flight; the striped one is also its
+            ## hit pose during the scene-clear freeze.
+            {
+                'name': 'wb_ball', 'type': 'group',
+                'files': ['wb_ball_1.npy', 'wb_ball_2.npy']
+            },
             {'name': 'flyer_red', 'type': 'single', 'file': 'flyer_red.npy'},
+            ## Third water scene ("water C"): daylight sky, navy water and a
+            ## green seabed (solids and the recolored seabed strip come from
+            ## the longplay video), plus the roster only this scene has.
+            {'name': 'wc_sky', 'type': 'single', 'file': 'wc_sky.npy'},
+            {'name': 'wc_water', 'type': 'single', 'file': 'wc_water.npy'},
+            {'name': 'wc_seabed', 'type': 'single', 'file': 'wc_seabed.npy'},
+            {'name': 'wc_cloud', 'type': 'single', 'file': 'wc_cloud.npy'},
+            {'name': 'wc_ship', 'type': 'single', 'file': 'wc_ship.npy'},
+            ## The daylight rocket is a small 5x8 gray pyramid (block-sampled
+            ## from the video); the flame version shows while it climbs
+            {'name': 'wc_rocket', 'type': 'single', 'file': 'wc_rocket.npy'},
+            {'name': 'wc_rocket_fire', 'type': 'single', 'file': 'wc_rocket_fire.npy'},
+            {'name': 'wc_base', 'type': 'single', 'file': 'wc_base.npy'},
+            {'name': 'wc_goal', 'type': 'single', 'file': 'wc_goal.npy'},
             {
                 'name': 'scuba', 'type': 'group',
                 'files': ['scuba_1.npy', 'scuba_2.npy']
@@ -97,9 +118,18 @@ def get_default_asset_config() -> tuple:
                 'pattern': 'score_{}.npy'
             },
             {
-                'name': 'bullet', 'type': 'group', 
+                'name': 'bullet', 'type': 'group',
                 'files': ['bullet.npy', 'w_bullet.npy'] ## w_bullet is the player's water bullet
-            }
+            },
+            ## The submarine's shot: two yellow 2x2 dots stacked with a gap
+            ## (block-sampled from the longplay)
+            {'name': 'sub_shot', 'type': 'single', 'file': 'sub_shot.npy'},
+            ## Rocket debris that reached the daylight waterline: a red /
+            ## pink sparkle alternating between two dot patterns (video)
+            {
+                'name': 'wc_splash', 'type': 'group',
+                'files': ['wc_splash_1.npy', 'wc_splash_2.npy']
+            },
         ]
         return asset_config
 
@@ -164,7 +194,9 @@ class JamesBondConstants(struct.PyTreeNode):
     ## Reaching the second water scene takes ~9000 clean frames (land
     ## 4454 + water 4435 + death freezes), so the old 5000 cap ended every
     ## episode before the dock bonus could ever pay out.
-    MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=20000)
+    ## Water B (~4435 more) and the daylight scene (~4000 + the ending)
+    ## push a full run past 17k clean frames, so leave room for deaths.
+    MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=30000)
 
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=13) ##TODO: There is 13 pixels in the diamond sprite, including the shining thing of diamond 
@@ -251,13 +283,21 @@ class JamesBondConstants(struct.PyTreeNode):
     ## water, new enemy set) which never ended in a 22000 frame probe, so
     ## it is treated as endless here.
     ## START_STAGE jumps a fresh game straight into a later scene for
-    ## playtesting (0 land, 1 first water, 2 second water). Settable
-    ## without code changes via the JB_START_STAGE environment variable:
-    ##   JB_START_STAGE=1 python scripts/play.py -g jamesbond
+    ## playtesting (0 land, 1 first water, 2 second water, 3 daylight
+    ## water). Settable without code changes via the JB_START_STAGE
+    ## environment variable:
+    ##   JB_START_STAGE=3 python scripts/play.py -g jamesbond
     START_STAGE: int = struct.field(pytree_node=False, default=0)
     STAGE_ONE_LENGTH: int = struct.field(pytree_node=False, default=4454)
     STAGE_TWO_LENGTH: int = struct.field(pytree_node=False, default=4435)
-    SCORE_STAGE_BONUS: int = struct.field(pytree_node=False, default=5000) ## boarding the dock after water-A
+    ## Scene names used in comments and docs (stage index in brackets):
+    ##   [0] land, [1] water A with the oil rig, [2] water B, the dark
+    ##   water with the big rockets and the pink balls, [3] water C, the
+    ##   daylight scene. [4] is only the terminal marker after the last
+    ##   bonus. Every scene ends with the same 59-frame freeze + colour
+    ##   cycle and a 5000 bonus: landing on the rig, shooting enough pink
+    ##   balls, diving into the daylight objective.
+    SCORE_STAGE_BONUS: int = struct.field(pytree_node=False, default=5000)
 
     ## Water scene: scuba diver. Measured in ALE frame by frame (two
     ## agents cross-checked): a vertical swimmer, 7 wide x 20 tall
@@ -342,20 +382,109 @@ class JamesBondConstants(struct.PyTreeNode):
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
     SUBMARINE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=260)
+    ## The pink ball (fields still called wb_heli_*): enters at the LEFT
+    ## edge at row 57 and crosses to the right at 1.75 px/f (7 px every 4
+    ## frames, read off the longplay at 60 fps). The anti-air shot pops
+    ## it for 500; the shot that reaches WB_BALL_HITS_TO_EXIT ends the
+    ## scene: the ball hangs in its striped pose while the scene freezes
+    ## for the usual 59 frames, the sky flickers dark/light for the first
+    ## ~21 of them, then the 5000 bonus pays and the daylight scene
+    ## starts. The footage shows three 500-point hits before the exit
+    ## (6000->6500, 6700->7200, 7600->8100); the team's count was two,
+    ## so this is one constant to flip.
     WB_HELI_Y: int = struct.field(pytree_node=False, default=57)
-    WB_HELI_WIDTH: int = struct.field(pytree_node=False, default=4)
+    WB_HELI_WIDTH: int = struct.field(pytree_node=False, default=9)
     WB_HELI_HEIGHT: int = struct.field(pytree_node=False, default=11)
-    WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=320)
+    WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
+    SCORE_BALL: int = struct.field(pytree_node=False, default=500)
+    WB_BALL_HITS_TO_EXIT: int = struct.field(pytree_node=False, default=3)
+    WB_EXIT_FLICKER_FRAMES: int = struct.field(pytree_node=False, default=21)
     ## The "small red flyer" of the early survey turned out to be the
     ## rocket's explosion debris (two stacked 4x2 red bars), not an enemy
     ## of its own: it spawns where the rocket bursts and drifts harmlessly.
     WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
     WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
     WB_FLYER_HEIGHT: int = struct.field(pytree_node=False, default=5)
-    ## The submarine occasionally fires a short underwater torpedo up-left
-    ## ((-2,-1) px/frame, dies before reaching the surface). Measured as
-    ## harmless in every probe -- pure theatre.
-    SUB_TORPEDO_PERIOD: int = struct.field(pytree_node=False, default=400)
+    ## Submarine, water B and C alike (longplay, 60 fps): it enters from
+    ## the LEFT edge and cruises right, 2 px every 3 frames. Once per pass,
+    ## as it crosses SUB_FIRE_X, it fires a double-dot shot from its bow
+    ## that runs diagonally back and up ((-2,-1) px/frame, the "back-
+    ## upward" leg) until it reaches SUB_SHOT_LEVEL_Y just under the
+    ## surface, then straight left along that row at 4 px every 3 frames
+    ## until it leaves the screen. It costs a life on contact: it passes
+    ## under a surfaced hull but crosses a diving boat's path.
+    SUB_SPAWN_X: int = struct.field(pytree_node=False, default=-12)
+    SUB_FIRE_X: int = struct.field(pytree_node=False, default=70)
+    SUB_SHOT_LEVEL_Y: int = struct.field(pytree_node=False, default=124)
+    SUB_SHOT_WIDTH: int = struct.field(pytree_node=False, default=2)
+    SUB_SHOT_HEIGHT: int = struct.field(pytree_node=False, default=5)
+
+    ## Third water scene ("water C", the daylight one after water B). All
+    ## numbers below were read frame by frame off a longplay recording
+    ## (rows calibrated on the waterline, good to ~3 rows; speeds from
+    ## 5-60 fps samples), NOT from ALE -- refine them when the ROM's exit
+    ## from water B is found and the scene can be probed directly.
+    WC_LENGTH: int = struct.field(pytree_node=False, default=3960)       ## frames until the sunken base scrolls in
+    ## The scene runs in two phases: first rockets and the submarine, then
+    ## the steamship takes the rockets' place (the submarine and the
+    ## helicopter stay). The video switches somewhere in a scrubbed gap
+    ## 44-53 s in, so this is a rough middle value.
+    WC_SHIP_PHASE_START: int = struct.field(pytree_node=False, default=2800)
+    ## Rockets: up to two launch pads sit in the water at once, at random
+    ## columns, each riding the seabed scroll until its own launch moment.
+    ## The daylight pyramid is smaller than water B's: 5 wide, 8 tall.
+    WC_ROCKET_WIDTH: int = struct.field(pytree_node=False, default=5)
+    WC_ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    ## They are the scene's only regular score: either player round
+    ## destroys one. An unshot rocket bursts at the usual row; its red
+    ## debris then FALLS back to the waterline (1px/frame), floats there
+    ## for a moment and vanishes -- and it is lethal on the way down.
+    WC_ROCKET_SLOTS: int = struct.field(pytree_node=False, default=2)
+    WC_ROCKET_SPAWN_MIN_X: int = struct.field(pytree_node=False, default=20)
+    WC_ROCKET_SPAWN_MAX_X: int = struct.field(pytree_node=False, default=140)
+    WC_ROCKET_IDLE_MIN: int = struct.field(pytree_node=False, default=60)  ## frames a pad rides the seabed before launching
+    WC_ROCKET_IDLE_MAX: int = struct.field(pytree_node=False, default=180)
+    WC_ROCKET_GAP_MIN: int = struct.field(pytree_node=False, default=60)   ## breather before a slot refills
+    WC_ROCKET_GAP_MAX: int = struct.field(pytree_node=False, default=200)
+    SCORE_ROCKET_SHOT: int = struct.field(pytree_node=False, default=100)
+    WC_DEBRIS_REST_Y: int = struct.field(pytree_node=False, default=119)
+    WC_DEBRIS_REST_FRAMES: int = struct.field(pytree_node=False, default=40)
+    ## The depth charge sinks the submarine (seen twice in the daylight
+    ## footage, +200 each time)
+    SCORE_SUBMARINE_SHOT: int = struct.field(pytree_node=False, default=200)
+    ## The daylight anti-air shot also pops the falling debris for +100
+    ## (video: 13500 -> 13600 right after a burst)
+    SCORE_DEBRIS_SHOT: int = struct.field(pytree_node=False, default=100)
+    WC_SPLASH_WIDTH: int = struct.field(pytree_node=False, default=6)     ## the waterline sparkle's footprint
+    WC_SPLASH_HEIGHT: int = struct.field(pytree_node=False, default=3)
+    WC_SPLASH_Y: int = struct.field(pytree_node=False, default=118)
+    WC_SPLASH_FLIP_FRAMES: int = struct.field(pytree_node=False, default=6) ## pattern swap cadence
+    ## Steamship riding the waterline right to left at the helicopter's
+    ## 0.6px/f, one pass right after the other. Only its deck and hull
+    ## (the lower rows) are solid, so a jump clears it and a dive ducks it.
+    WC_SHIP_WIDTH: int = struct.field(pytree_node=False, default=16)
+    WC_SHIP_HEIGHT: int = struct.field(pytree_node=False, default=16)
+    WC_SHIP_Y: int = struct.field(pytree_node=False, default=106)        ## hull rows 118-121 sit on the waterline
+    WC_SHIP_HULL_TOP: int = struct.field(pytree_node=False, default=114)
+    WC_SHIP_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=30)
+    ## Ending: the seabed hills stop, a sunken base scrolls in with the
+    ## world, and once it reaches the trigger column a green objective
+    ## appears above it, nearly stationary. Touching the objective freezes
+    ## the scene for the usual colour cycle, pays the 5000 bonus and ends
+    ## the game (the video's title screen still showed 3 lives).
+    WC_BASE_WIDTH: int = struct.field(pytree_node=False, default=31)
+    WC_BASE_HEIGHT: int = struct.field(pytree_node=False, default=26)
+    WC_BASE_Y: int = struct.field(pytree_node=False, default=154)       ## sits on the water body bottom (rows 154-179)
+    WC_GOAL_WIDTH: int = struct.field(pytree_node=False, default=8)
+    WC_GOAL_HEIGHT: int = struct.field(pytree_node=False, default=18)
+    WC_GOAL_Y: int = struct.field(pytree_node=False, default=135)
+    WC_GOAL_TRIGGER_X: int = struct.field(pytree_node=False, default=66)   ## base column at which the objective appears
+    WC_GOAL_OFFSET_X: int = struct.field(pytree_node=False, default=20)    ## objective column relative to the base's left edge
+    WC_GOAL_DRIFT_PERIOD: int = struct.field(pytree_node=False, default=20) ## objective drifts left 1px every N frames
+    ## Helicopter bombs keep sinking under the surface here (seen reaching
+    ## the submarine's depth before fading), instead of dying at the waterline.
+    WC_BOMB_FLOOR: int = struct.field(pytree_node=False, default=140)
+    WIN_ANIMATION_FRAMES: int = struct.field(pytree_node=False, default=59) ## same freeze + colour cycle as a death
 
     ## Water scene: the satellite stops using the kitchen timer and instead
     ## releases its laser when it passes directly above the player (measured:
@@ -487,11 +616,14 @@ class JamesBondState:
     stage1_start_step: chex.Array   ## step_count at the moment the water scene (stage 1) began
     oil_rig_seq: chex.Array      ## countdown driving the appear-right / gap / appear-left sequence (0 = idle)
     diamond_shot: chex.Array     ## True the frame a diamond is shot; triggers the rig next frame
-    ## Second water scene roster
+    ## Second and third water scene roster. The rocket (and its debris)
+    ## has WC_ROCKET_SLOTS fixed slots: water B only ever fills the first,
+    ## the daylight scene runs both.
     rocket_x: chex.Array
     rocket_y: chex.Array
     rocket_active: chex.Array
     rocket_age: chex.Array ## ignites and launches after idling
+    rocket_launch_age: chex.Array ## per-slot age at which the pad launches
     rocket_timer: chex.Array
     submarine_x: chex.Array
     submarine_active: chex.Array
@@ -499,14 +631,29 @@ class JamesBondState:
     wb_heli_x: chex.Array
     wb_heli_active: chex.Array
     wb_heli_timer: chex.Array
-    ## Rocket explosion debris (the two red bars); timer is its age
+    wb_ball_hits: chex.Array ## pink balls shot this scene (water B exit counter)
+    ## Rocket explosion debris (the two red bars); timer is its age, y
+    ## only moves in the daylight scene where the bars fall back down
     wb_flyer_x: chex.Array
+    wb_flyer_y: chex.Array
     wb_flyer_active: chex.Array
     wb_flyer_timer: chex.Array
-    ## Submarine's harmless underwater torpedo
+    ## Submarine's double-dot shot (water B and C)
     sub_torp_x: chex.Array
     sub_torp_y: chex.Array
     sub_torp_active: chex.Array
+    sub_fired: chex.Array ## this pass already fired its one shot
+    ## Daylight scene: the steamship on the waterline, the sunken base
+    ## that ends the scene and the objective hovering above it
+    ship_x: chex.Array
+    ship_active: chex.Array
+    ship_timer: chex.Array
+    base_x: chex.Array
+    base_active: chex.Array
+    goal_x: chex.Array
+    goal_active: chex.Array
+    win_timer: chex.Array ## frames left in the mission-complete freeze
+    stage_start_step: chex.Array ## step_count when the current scene began
     fired_bullet: chex.Array
     key: chex.PRNGKey
 
@@ -520,8 +667,10 @@ class JamesBondObservation:
     helicopters: ObjectObservation
     satellites: ObjectObservation
     scubas: ObjectObservation
-    ## rocket, submarine, pink helicopter, red flyer (second water scene)
+    ## rockets, submarine, pink helicopter, steamship, debris (water B and C)
     waterb_enemies: ObjectObservation
+    ## sunken base and objective at the end of the daylight scene
+    waterc_landmarks: ObjectObservation
     bullets: ObjectObservation
     lives: jnp.ndarray
     score: jnp.ndarray
@@ -574,7 +723,7 @@ class JaxJamesBond(
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
             start_stage = int(os.environ.get("JB_START_STAGE", "1"))
-            consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
+            consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 3))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
 
@@ -586,6 +735,7 @@ class JaxJamesBond(
         if key is None:
             key = jax.random.PRNGKey(0)
         state_key, _ = jax.random.split(key)
+        slots = self.consts.WC_ROCKET_SLOTS
 
         state = JamesBondState(
             player_x=jnp.array(self.consts.PLAYER_INIT_X, dtype=jnp.int32), ## TODO: Change all float32 pos-s to int32
@@ -667,23 +817,36 @@ class JaxJamesBond(
             oil_rig_seq=jnp.array(0, dtype=jnp.int32),
             diamond_shot=jnp.array(False, dtype=jnp.bool_),
             #oil_rig_visible_timer=jnp.array(0, dtype=jnp.int32),
-            rocket_x=jnp.array(-1, dtype=jnp.int32),
-            rocket_y=jnp.array(-1, dtype=jnp.int32),
-            rocket_active=jnp.array(False, dtype=jnp.bool_),
-            rocket_age=jnp.array(0, dtype=jnp.int32),
-            rocket_timer=jnp.array(0, dtype=jnp.int32),
+            rocket_x=jnp.full((slots,), -1, dtype=jnp.int32),
+            rocket_y=jnp.full((slots,), -1, dtype=jnp.int32),
+            rocket_active=jnp.zeros((slots,), dtype=jnp.bool_),
+            rocket_age=jnp.zeros((slots,), dtype=jnp.int32),
+            rocket_launch_age=jnp.full((slots,), self.consts.ROCKET_IGNITE_AGE, dtype=jnp.int32),
+            rocket_timer=jnp.zeros((slots,), dtype=jnp.int32),
             submarine_x=jnp.array(-1, dtype=jnp.int32),
             submarine_active=jnp.array(False, dtype=jnp.bool_),
             submarine_timer=jnp.array(0, dtype=jnp.int32),
             wb_heli_x=jnp.array(-1, dtype=jnp.int32),
             wb_heli_active=jnp.array(False, dtype=jnp.bool_),
             wb_heli_timer=jnp.array(0, dtype=jnp.int32),
-            wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
-            wb_flyer_active=jnp.array(False, dtype=jnp.bool_),
-            wb_flyer_timer=jnp.array(0, dtype=jnp.int32),
+            wb_ball_hits=jnp.array(0, dtype=jnp.int32),
+            wb_flyer_x=jnp.full((slots,), -1, dtype=jnp.int32),
+            wb_flyer_y=jnp.full((slots,), self.consts.WB_FLYER_Y, dtype=jnp.int32),
+            wb_flyer_active=jnp.zeros((slots,), dtype=jnp.bool_),
+            wb_flyer_timer=jnp.zeros((slots,), dtype=jnp.int32),
             sub_torp_x=jnp.array(-1, dtype=jnp.int32),
             sub_torp_y=jnp.array(-1, dtype=jnp.int32),
             sub_torp_active=jnp.array(False, dtype=jnp.bool_),
+            sub_fired=jnp.array(False, dtype=jnp.bool_),
+            ship_x=jnp.array(-1, dtype=jnp.int32),
+            ship_active=jnp.array(False, dtype=jnp.bool_),
+            ship_timer=jnp.array(0, dtype=jnp.int32),
+            base_x=jnp.array(-1, dtype=jnp.int32),
+            base_active=jnp.array(False, dtype=jnp.bool_),
+            goal_x=jnp.array(-1, dtype=jnp.int32),
+            goal_active=jnp.array(False, dtype=jnp.bool_),
+            win_timer=jnp.array(0, dtype=jnp.int32),
+            stage_start_step=jnp.array(0, dtype=jnp.int32),
             fired_bullet=jnp.array(False, dtype=jnp.bool_), ## TODO: Already implemented for player through 'player_bullet_active'
             key=state_key,
         )
@@ -765,12 +928,38 @@ class JaxJamesBond(
                 wb_heli_active=sweep(state.wb_heli_active, False),
                 wb_flyer_active=sweep(state.wb_flyer_active, False),
                 sub_torp_active=sweep(state.sub_torp_active, False),
+                ship_active=sweep(state.ship_active, False),
                 ## The pit resets to its measured post-death position
                 pit_x=sweep(state.pit_x, 124),
                 hit_cooldown=sweep(state.hit_cooldown, 0),
             )
 
-        state = jax.lax.cond(state.death_timer > 0, frozen_step, live_step, state)
+        def win_step(state: JamesBondState) -> JamesBondState:
+            """Scene cleared: the scene freezes for the same colour cycle
+            as a death, then the bonus pays out and the next scene starts
+            with a swept roster (after the last scene, stage 4 is the
+            terminal marker, see _get_done)."""
+
+            win_timer = state.win_timer - 1
+            finished = win_timer <= 0
+            return state.replace(
+                win_timer=win_timer,
+                score=jnp.where(
+                    finished,
+                    state.score + self.consts.SCORE_STAGE_BONUS,
+                    state.score,
+                ).astype(jnp.int32),
+                stage=jnp.where(finished, state.stage + 1, state.stage).astype(jnp.int32),
+                stage_start_step=jnp.where(finished, state.step_count, state.stage_start_step),
+                **self._scene_clear_fields(state, finished),
+            )
+
+        state = jax.lax.cond(
+            state.win_timer > 0,
+            win_step,
+            lambda s: jax.lax.cond(s.death_timer > 0, frozen_step, live_step, s),
+            state,
+        )
 
         _, next_key = jax.random.split(state.key)
         state = state.replace(key=next_key)
@@ -807,13 +996,18 @@ class JaxJamesBond(
                 "scubas": spaces.get_object_space(
                     n=None, screen_size=screen_size
                 ),
-                ## rocket, submarine, pink helicopter, red flyer
+                ## two rockets, submarine, pink helicopter, steamship, two debris
                 "waterb_enemies": spaces.get_object_space(
-                    n=4, screen_size=screen_size
+                    n=3 + 2 * self.consts.WC_ROCKET_SLOTS, screen_size=screen_size
                 ),
-                ## player air bullet, player water bullet, helicopter bomb, satellite laser
+                ## sunken base and objective (daylight scene ending)
+                "waterc_landmarks": spaces.get_object_space(
+                    n=2, screen_size=screen_size
+                ),
+                ## player air bullet, player water bullet, helicopter bomb,
+                ## satellite laser, submarine shot
                 "bullets": spaces.get_object_space(
-                    n=4, screen_size=screen_size
+                    n=5, screen_size=screen_size
                 ),
                 "lives": spaces.Box(
                     low=0,
@@ -886,51 +1080,63 @@ class JaxJamesBond(
             self.consts.SCUBA_WIDTH,
             self.consts.SCUBA_HEIGHT,
         )
-        ## Second water scene roster in one fixed-slot group:
-        ## rocket, submarine, pink helicopter, red flyer. The shared box is
-        ## the largest of the four sprites.
+        ## Water B / C roster in one fixed-slot group: the rocket slots,
+        ## submarine, pink helicopter, steamship, then the debris slots.
+        ## The shared box is the largest of the sprites.
         waterb_enemies = self._object_group_observation(
-            jnp.stack([
+            jnp.concatenate([
                 state.rocket_x,
-                state.submarine_x,
-                state.wb_heli_x,
+                jnp.stack([state.submarine_x, state.wb_heli_x, state.ship_x]),
                 state.wb_flyer_x,
             ]),
-            jnp.stack([
+            jnp.concatenate([
                 state.rocket_y,
-                jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
-                jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
-                jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
+                jnp.array([
+                    self.consts.SUBMARINE_Y,
+                    self.consts.WB_HELI_Y,
+                    self.consts.WC_SHIP_Y,
+                ], dtype=jnp.int32),
+                state.wb_flyer_y,
             ]),
-            jnp.stack([
+            jnp.concatenate([
                 state.rocket_active,
-                state.submarine_active,
-                state.wb_heli_active,
+                jnp.stack([state.submarine_active, state.wb_heli_active, state.ship_active]),
                 state.wb_flyer_active,
             ]),
             self.consts.SUBMARINE_WIDTH,
             self.consts.SUBMARINE_HEIGHT,
         )
-        ## All four projectiles in one group, they share the same 1x4 sprite:
-        ## player air bullet, player water bullet, helicopter bomb, satellite laser
+        waterc_landmarks = self._object_group_observation(
+            jnp.stack([state.base_x, state.goal_x]),
+            jnp.array([self.consts.WC_BASE_Y, self.consts.WC_GOAL_Y], dtype=jnp.int32),
+            jnp.stack([state.base_active, state.goal_active]),
+            self.consts.WC_BASE_WIDTH,
+            self.consts.WC_BASE_HEIGHT,
+        )
+        ## All projectiles in one group (the 1x4 box is close enough for
+        ## the submarine's 2x5 shot too): player air bullet, player water
+        ## bullet, helicopter bomb, satellite laser, submarine shot
         bullets = self._object_group_observation(
             jnp.stack([
                 state.player_bullet_x,
                 state.player_wbullet_x,
                 state.helicopter_bomb_x,
                 state.satellite_laser_x,
+                state.sub_torp_x,
             ]),
             jnp.stack([
                 state.player_bullet_y,
                 state.player_wbullet_y,
                 state.helicopter_bomb_y,
                 state.satellite_laser_y,
+                state.sub_torp_y,
             ]),
             jnp.stack([
                 state.player_bullet_active,
                 state.player_wbullet_active,
                 state.helicopter_bomb_active,
                 state.satellite_laser_active,
+                state.sub_torp_active,
             ]),
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
@@ -942,6 +1148,7 @@ class JaxJamesBond(
             satellites=satellites,
             scubas=scubas,
             waterb_enemies=waterb_enemies,
+            waterc_landmarks=waterc_landmarks,
             bullets=bullets,
             lives=state.lives,
             score=state.score,
@@ -1823,13 +2030,6 @@ class JaxJamesBond(
             player_bullet_y = bullet_state.player_bullet_y,
         )
 
-    def step_player_stage_three_placeholder(
-        self, args
-    ):
-        state, atari_action = args
-        
-        return state
-
     def _step_player(
         self, state: JamesBondState, atari_action: chex.Array
     ) -> JamesBondState:
@@ -1839,7 +2039,11 @@ class JaxJamesBond(
             [
                 self.step_player_stage_one,
                 self.step_player_stage_two,
-                ## The second water scene drives the same boat physics
+                ## The second and third water scenes drive the same boat
+                ## physics and fire the same two rounds (the daylight
+                ## video shows the anti-air shot and the depth charge
+                ## in the air together).
+                self.step_player_stage_two,
                 self.step_player_stage_two,
             ],
             (state, atari_action)
@@ -1857,10 +2061,12 @@ class JaxJamesBond(
 
         lives_lost = self.consts.MAX_LIVES - state.lives
 
-        new_stage = jnp.where( ## TODO: add transition to stage 3
+        ## Land -> water A on the clock (each lost life stretches it).
+        ## The old rule was not stage-aware and dragged water B straight
+        ## back to water A one frame after the rig landing.
+        land_done = jnp.logical_and(
+            state.stage == 0,
             state.step_count > 3000 + lives_lost * 1000,
-            1,
-            state.stage
         )
 
         ## Landing on TOP of the oil rig ends the water scene and advances
@@ -1875,16 +2081,20 @@ class JaxJamesBond(
             state.player_y <= state.oil_rig_y + self.consts.OIL_RIG_TOP_LAND_MARGIN,
         )
         landed_on_rig = state.oil_rig_active & rig_over_deck & rig_on_top
+        water_a_done = jnp.logical_and(state.stage == 1, landed_on_rig)
+
+        ## Water B ends by shooting the pink balls and water C by diving
+        ## into the objective; both run through the scene-clear freeze
+        ## (win_step), which advances the stage itself.
         new_stage = jnp.where(
-            jnp.logical_and(new_stage == 1, landed_on_rig),
-            2,
-            new_stage
-        )
+            land_done | water_a_done,
+            state.stage + 1,
+            state.stage,
+        ).astype(jnp.int32)
 
         switch = state.stage != new_stage
 
-        def clear(v, park):
-            return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
+        stage_start_step = jnp.where(switch, state.step_count, state.stage_start_step)
 
         ## Remember when the water scene (stage 1) begins, so the oil rig
         ## can be time-gated to appear only 1000+ steps into it.
@@ -1895,8 +2105,35 @@ class JaxJamesBond(
         oil_rig_done_reset = jnp.where(entering_stage1, jnp.array(False, dtype=jnp.bool_), state.oil_rig_done)
         return state.replace(
             stage=new_stage,
+            stage_start_step=stage_start_step,
             stage1_start_step=stage1_start_step,
             oil_rig_done=oil_rig_done_reset,
+            **self._scene_clear_fields(state, switch),
+        )
+
+    def _scene_clear_fields(self, state: JamesBondState, switch: chex.Array) -> dict:
+        """Every scene-owned actor, projectile and counter, parked when
+        `switch` is set -- shared by the scroll-driven handovers in
+        _update_stage and by the scene-clear freeze in step()."""
+
+        def clear(v, park):
+            return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
+
+        return dict(
+            ## Water B / C actors do not carry over
+            rocket_active=clear(state.rocket_active, False),
+            rocket_timer=clear(state.rocket_timer, 0),
+            submarine_active=clear(state.submarine_active, False),
+            submarine_timer=clear(state.submarine_timer, 0),
+            wb_heli_active=clear(state.wb_heli_active, False),
+            wb_ball_hits=clear(state.wb_ball_hits, 0),
+            wb_flyer_active=clear(state.wb_flyer_active, False),
+            sub_torp_active=clear(state.sub_torp_active, False),
+            sub_fired=clear(state.sub_fired, False),
+            ship_active=clear(state.ship_active, False),
+            ship_timer=clear(state.ship_timer, 0),
+            base_active=clear(state.base_active, False),
+            goal_active=clear(state.goal_active, False),
             ## Land objects vanish at the shoreline
             helicopter_active=clear(state.helicopter_active, False),
             helicopter_melee_step=clear(state.helicopter_melee_step, 0),
@@ -2059,19 +2296,26 @@ class JaxJamesBond(
                       state.oil_rig_x),
         )
 
-        # Second water scene roster (stage 2)
+        # Second and third water scene roster (stages 2 and 3)
         in_water_b = state.stage == 2
-        ## Rocket, measured cycle: floats submerged for a few frames, then
-        ## climbs straight up 1px/frame and bursts with its tip at the
-        ## measured explosion row -- leaving the red debris bars and a
-        ## short full-sky flash.
+        in_water_c = state.stage == 3
+        in_water_bc = in_water_b | in_water_c
+        scroll_tick = state.step_count % 4 == 0
+        frames_in_stage = state.step_count - state.stage_start_step
+        ## Daylight phases: rockets first, ships later (see WC_SHIP_PHASE_START)
+        rocket_phase = in_water_c & (frames_in_stage < self.consts.WC_SHIP_PHASE_START)
+        ship_phase = in_water_c & (frames_in_stage >= self.consts.WC_SHIP_PHASE_START)
+        ## Rocket, measured cycle: floats submerged riding the world scroll
+        ## until its launch age, then climbs straight up 1px/frame and
+        ## bursts with its tip at the measured explosion row -- leaving
+        ## the red debris bars (and, in water B, a short full-sky flash).
+        ## Every rocket variable holds one entry per launch-pad slot.
         rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
-        rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
-        next_rocket_x = jnp.where(
-            state.rocket_active & (~rocket_flying) & (state.step_count % 4 == 0),
-            state.rocket_x - 1,
-            state.rocket_x
-        )
+        rocket_flying = rocket_age >= state.rocket_launch_age
+        ## Water B's rocket goes straight up; the daylight one keeps
+        ## drifting with the world while it climbs (video: -3px / 12f).
+        rocket_drifts = state.rocket_active & scroll_tick & ((~rocket_flying) | in_water_c)
+        next_rocket_x = jnp.where(rocket_drifts, state.rocket_x - 1, state.rocket_x)
         next_rocket_y = jnp.where(
             state.rocket_active & rocket_flying,
             state.rocket_y - 1,
@@ -2083,56 +2327,162 @@ class JaxJamesBond(
         next_rocket_active = state.rocket_active & (~rocket_explodes) & (
             next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
         )
-        ## Submarine: cruises left under water, a touch faster than the scroll
+        ## Submarine (water B and C): enters from the LEFT and cruises
+        ## right, 2px every 3 frames (video: ~0.6-0.7 px/f in both scenes)
+        sub_dx = jnp.where(state.step_count % 3 != 0, 1, 0)
         next_submarine_x = jnp.where(
-            state.submarine_active & (state.step_count % 3 == 0),
-            state.submarine_x - 1,
+            state.submarine_active,
+            state.submarine_x + sub_dx,
             state.submarine_x
         )
         next_submarine_active = state.submarine_active & (
-            next_submarine_x > self.consts.GAME_AREA_MIN_X - self.consts.SUBMARINE_WIDTH
+            next_submarine_x < self.consts.OBJECT_EXIT_X
         )
-        ## Submarine torpedo: a short underwater dart, up-left at (-2,-1)
-        ## per frame, gone before it reaches the surface. Harmless theatre.
-        next_torp_x = jnp.where(state.sub_torp_active, state.sub_torp_x - 2, -1)
-        next_torp_y = jnp.where(state.sub_torp_active, state.sub_torp_y - 1, -1)
-        next_torp_active = state.sub_torp_active & (next_torp_y > 124)
+        ## Submarine shot (water B and C, video): two stacked dots leave
+        ## the bow as the submarine crosses SUB_FIRE_X, run diagonally
+        ## back and up at (-2,-1)/frame until they sit just under the
+        ## surface, then straight left along that row at 4px every 3
+        ## frames until they leave the screen.
+        at_level = state.sub_torp_y <= self.consts.SUB_SHOT_LEVEL_Y
+        run_dx = jnp.where(state.step_count % 3 == 0, -2, -1)
+        torp_dx = jnp.where(at_level, run_dx, -2)
+        torp_dy = jnp.where(at_level, 0, -1)
+        next_torp_x = jnp.where(state.sub_torp_active, state.sub_torp_x + torp_dx, -1)
+        next_torp_y = jnp.where(
+            state.sub_torp_active,
+            jnp.maximum(state.sub_torp_y + torp_dy, self.consts.SUB_SHOT_LEVEL_Y),
+            -1,
+        )
+        next_torp_active = state.sub_torp_active & (
+            next_torp_x > self.consts.GAME_AREA_MIN_X - self.consts.SUB_SHOT_WIDTH
+        )
+        crossed_fire_x = jnp.logical_and(
+            state.submarine_x < self.consts.SUB_FIRE_X,
+            next_submarine_x >= self.consts.SUB_FIRE_X,
+        )
         fire_torp = (
-            in_water_b & next_submarine_active & (~next_torp_active)
-            & (state.step_count % self.consts.SUB_TORPEDO_PERIOD == 0)
+            in_water_bc & next_submarine_active & (~state.sub_fired)
+            & (~next_torp_active) & crossed_fire_x
         )
-        next_torp_x = jnp.where(fire_torp, next_submarine_x + 3, next_torp_x)
-        next_torp_y = jnp.where(fire_torp, jnp.array(self.consts.SUBMARINE_Y - 2, dtype=jnp.int32), next_torp_y)
+        next_torp_x = jnp.where(
+            fire_torp, next_submarine_x + self.consts.SUBMARINE_WIDTH - self.consts.SUB_SHOT_WIDTH, next_torp_x
+        )
+        next_torp_y = jnp.where(fire_torp, jnp.array(self.consts.SUBMARINE_Y - 3, dtype=jnp.int32), next_torp_y)
         next_torp_active = next_torp_active | fire_torp
-        ## Pink helicopter: drifts left across the sky (drops nothing)
+        ## One shot per pass: the flag lifts when the submarine is gone
+        next_sub_fired = (state.sub_fired | fire_torp) & next_submarine_active
+        ## Pink ball: crosses the sky left to right, 7px every 4 frames
+        ## (+2,+2,+2,+1), and leaves at the right edge if nobody pops it
         next_wb_heli_x = jnp.where(
-            state.wb_heli_active & (state.step_count % 2 == 0),
-            state.wb_heli_x - 1,
+            state.wb_heli_active,
+            state.wb_heli_x + jnp.where(state.step_count % 4 == 3, 1, 2),
             state.wb_heli_x
         )
         next_wb_heli_active = state.wb_heli_active & (
-            next_wb_heli_x > self.consts.GAME_AREA_MIN_X - self.consts.WB_HELI_WIDTH
+            next_wb_heli_x < self.consts.OBJECT_EXIT_X
         )
-        ## Rocket debris: the two red bars linger where the rocket burst,
-        ## drifting with the world until their clock runs out
+        ## Rocket debris: the two red bars drift with the world. In water B
+        ## they linger where the rocket burst until their clock runs out;
+        ## in the daylight scene they fall 1px/frame back to the waterline
+        ## (the clock is held while falling), float there briefly, then go.
         debris_age = jnp.where(state.wb_flyer_active, state.wb_flyer_timer + 1, 0)
         next_wb_flyer_x = jnp.where(
-            state.wb_flyer_active & (state.step_count % 4 == 0),
+            state.wb_flyer_active & scroll_tick,
             state.wb_flyer_x - 1,
             state.wb_flyer_x
         )
-        next_wb_flyer_active = state.wb_flyer_active & (
-            debris_age < self.consts.DEBRIS_LIFETIME_FRAMES
+        debris_falling = in_water_c & (state.wb_flyer_y < self.consts.WC_DEBRIS_REST_Y)
+        next_wb_flyer_y = jnp.where(
+            state.wb_flyer_active & debris_falling,
+            state.wb_flyer_y + 1,
+            state.wb_flyer_y
         )
-        ## The burst hands over: rocket out, debris in at the burst column
+        debris_age = jnp.where(debris_falling, 0, debris_age)
+        debris_lifetime = jnp.where(
+            in_water_c,
+            self.consts.WC_DEBRIS_REST_FRAMES,
+            self.consts.DEBRIS_LIFETIME_FRAMES,
+        )
+        next_wb_flyer_active = state.wb_flyer_active & (debris_age < debris_lifetime)
+        ## The burst hands over: rocket out, debris in centred on the burst column
         next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
-        next_wb_flyer_x = jnp.where(rocket_explodes, next_rocket_x + 2, next_wb_flyer_x)
+        debris_offset = jnp.where(
+            in_water_c,
+            (self.consts.WC_ROCKET_WIDTH - self.consts.WB_FLYER_WIDTH) // 2,
+            (self.consts.ROCKET_WIDTH - self.consts.WB_FLYER_WIDTH) // 2,
+        )
+        next_wb_flyer_x = jnp.where(rocket_explodes, next_rocket_x + debris_offset, next_wb_flyer_x)
+        next_wb_flyer_y = jnp.where(
+            rocket_explodes,
+            jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
+            next_wb_flyer_y,
+        )
         debris_age = jnp.where(rocket_explodes, 0, debris_age)
+
+        ## Steamship (daylight scene): rides the waterline right to left at
+        ## the helicopter's cruising speed, 3px every 5 frames
+        ship_move = (state.step_count % 5 == 0) | (state.step_count % 5 == 2) | (state.step_count % 5 == 4)
+        next_ship_x = jnp.where(
+            state.ship_active & ship_move,
+            state.ship_x - 1,
+            state.ship_x
+        )
+        next_ship_active = state.ship_active & (
+            next_ship_x > self.consts.GAME_AREA_MIN_X - self.consts.WC_SHIP_WIDTH
+        )
+
+        ## Sunken base (daylight ending): scrolls in from the right once
+        ## the scene has run its course and rides the world scroll; the
+        ## objective appears above it at the trigger column and then
+        ## drifts left only very slowly, so the base passes underneath it.
+        next_base_x = jnp.where(
+            state.base_active & scroll_tick,
+            state.base_x - 1,
+            state.base_x
+        )
+        next_base_active = state.base_active & (
+            next_base_x > self.consts.GAME_AREA_MIN_X - self.consts.WC_BASE_WIDTH
+        )
+        ## If the objective was missed and drifted away, the base comes
+        ## round again so the mission can still be finished.
+        spawn_base = (
+            in_water_c & (~next_base_active) & (~state.goal_active)
+            & (frames_in_stage >= self.consts.WC_LENGTH)
+        )
+        next_base_active = next_base_active | spawn_base
+        next_base_x = jnp.where(
+            spawn_base,
+            jnp.array(self.consts.OBJECT_SPAWN_X_FAR, dtype=jnp.int32),
+            next_base_x,
+        )
+        goal_drift = state.step_count % self.consts.WC_GOAL_DRIFT_PERIOD == 0
+        next_goal_x = jnp.where(
+            state.goal_active & goal_drift,
+            state.goal_x - 1,
+            state.goal_x
+        )
+        next_goal_active = state.goal_active & (
+            next_goal_x > self.consts.GAME_AREA_MIN_X - self.consts.WC_GOAL_WIDTH
+        )
+        ## The base moves one column at a time, so the trigger column is
+        ## crossed exactly once per pass
+        spawn_goal = (
+            in_water_c & next_base_active & (~next_goal_active)
+            & (next_base_x == self.consts.WC_GOAL_TRIGGER_X)
+        )
+        next_goal_active = next_goal_active | spawn_goal
+        next_goal_x = jnp.where(
+            spawn_goal,
+            next_base_x + self.consts.WC_GOAL_OFFSET_X,
+            next_goal_x,
+        )
 
         # Enemies
         ## Helicopter enemy (Scroll left)
         ## 1. Determine which speed zone the helicopter is currently in, also affecting melee behavior of helicopter
-        in_slow_mode = (state.helicopter_x <= 96) & (state.helicopter_x > 63)
+        ## (the daylight scene's helicopter crosses at a constant ~0.6 px/f
+        ## with no searchlight sweep, so it never enters the slow zone there)
+        in_slow_mode = (state.helicopter_x <= 96) & (state.helicopter_x > 63) & (~in_water_c)
         ## 2. The speed of helicopter is 0.6 pixels per frame in normal mode, and 0.375 pixels per frame in slow mode
         move_normal = (state.step_count % 5 == 0) | (state.step_count % 5 == 2) | (state.step_count % 5 == 4)
         move_slow = (state.step_count % 8 == 1) | (state.step_count % 8 == 4) | (state.step_count % 8 == 7)
@@ -2193,10 +2543,14 @@ class JaxJamesBond(
         # also patrols the first water scene, dropping the same bombs
         # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
         # per crossing). Only the second water scene retires it.
-        spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
+        ## The daylight scene has no floating diamond, and its red
+        ## helicopter comes back pass after pass (video), so there the
+        ## helicopter ignores the turn flag.
+        spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b) & (~in_water_c)
         ## The helicopter spawning will be delayed by 75 frames from initial state
         helicopter_delay_passed = state.step_count >= 75
-        spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active) & (helicopter_delay_passed)
+        helicopter_turn = ((~state.spawn_diamond_next) & (~in_water_b)) | in_water_c
+        spawn_helicopter = row_57_empty & helicopter_turn & (~state.oil_rig_active) & (helicopter_delay_passed)
         ## The satellite takes a measured ~65 frame breather between passes;
         ## the gap also lets its per-pass laser counter reset.
         satellite_respawn_timer = jnp.where(
@@ -2213,35 +2567,84 @@ class JaxJamesBond(
         )
         can_spawn_pit = (~next_pit_active) & on_land ## Only spawn when the previous pit left the screen
 
-        ## Second water scene spawners: each object enters from the right
-        ## on its own staggered breather so the roster stays mixed.
-        def waterb_spawner(active, timer, gap):
+        ## Water B / C spawners: each object enters on its own staggered
+        ## breather so the roster stays mixed. `scene` says which scenes
+        ## the object belongs to; the timer is parked while it is absent.
+        def waterb_spawner(active, timer, gap, scene):
             next_timer = jnp.where(
-                active | (~in_water_b),
-                jnp.array(gap, dtype=jnp.int32),
+                active | (~scene),
+                jnp.asarray(gap, dtype=jnp.int32),
                 jnp.maximum(timer - 1, 0),
             )
-            spawn = in_water_b & (~active) & (next_timer == 0)
+            spawn = scene & (~active) & (next_timer == 0)
             return spawn, next_timer
 
-        ## The rocket appears mid-screen already submerged (measured x~85),
-        ## on its 256-frame cycle: ~85 frames of life + this breather.
+        ## Rocket pads. Water B keeps its single pad (slot 0) appearing
+        ## mid-screen (measured x~85) on the 256-frame cycle: ~85 frames
+        ## of life + the breather. The daylight scene fills every slot at
+        ## a random column, after a random breather, and lets each pad
+        ## ride the seabed for a random while before it launches.
+        slot_ids = jnp.arange(self.consts.WC_ROCKET_SLOTS)
+        rocket_scene = (in_water_b & (slot_ids == 0)) | rocket_phase
+        random_gap = jax.random.randint(
+            jax.random.fold_in(state.key, 7), slot_ids.shape,
+            self.consts.WC_ROCKET_GAP_MIN, self.consts.WC_ROCKET_GAP_MAX + 1,
+        )
+        random_x = jax.random.randint(
+            jax.random.fold_in(state.key, 8), slot_ids.shape,
+            self.consts.WC_ROCKET_SPAWN_MIN_X, self.consts.WC_ROCKET_SPAWN_MAX_X + 1,
+        )
+        random_idle = jax.random.randint(
+            jax.random.fold_in(state.key, 9), slot_ids.shape,
+            self.consts.WC_ROCKET_IDLE_MIN, self.consts.WC_ROCKET_IDLE_MAX + 1,
+        )
+        rocket_gap = jnp.where(in_water_c, random_gap, self.consts.ROCKET_RESPAWN_FRAMES)
         spawn_rocket, rocket_timer = waterb_spawner(
-            next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
+            next_rocket_active, state.rocket_timer, rocket_gap, rocket_scene)
         next_rocket_active = next_rocket_active | spawn_rocket
-        next_rocket_x = jnp.where(spawn_rocket, self.consts.ROCKET_SPAWN_X, next_rocket_x)
-        next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y)
+        next_rocket_x = jnp.where(
+            spawn_rocket,
+            jnp.where(in_water_c, random_x, self.consts.ROCKET_SPAWN_X),
+            next_rocket_x,
+        ).astype(jnp.int32)
+        next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y).astype(jnp.int32)
         rocket_age = jnp.where(spawn_rocket, 0, rocket_age)
+        rocket_launch_age = jnp.where(
+            spawn_rocket,
+            jnp.where(in_water_c, random_idle, self.consts.ROCKET_IGNITE_AGE),
+            state.rocket_launch_age,
+        ).astype(jnp.int32)
 
+        ## The submarine enters from the left in both water scenes
         spawn_submarine, submarine_timer = waterb_spawner(
-            next_submarine_active, state.submarine_timer, self.consts.SUBMARINE_RESPAWN_FRAMES)
+            next_submarine_active, state.submarine_timer,
+            self.consts.SUBMARINE_RESPAWN_FRAMES, in_water_bc)
         next_submarine_active = next_submarine_active | spawn_submarine
-        next_submarine_x = jnp.where(spawn_submarine, self.consts.OBJECT_SPAWN_X_FAR, next_submarine_x)
+        next_submarine_x = jnp.where(
+            spawn_submarine, self.consts.SUB_SPAWN_X, next_submarine_x
+        ).astype(jnp.int32)
+        next_sub_fired = next_sub_fired & (~spawn_submarine)
 
+        ## The pink ball belongs to water B only and enters at the LEFT
+        ## edge; the daylight scene flies the red land helicopter instead
+        ## (spawned above)
         spawn_wb_heli, wb_heli_timer = waterb_spawner(
-            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES)
+            next_wb_heli_active, state.wb_heli_timer,
+            self.consts.WB_HELI_RESPAWN_FRAMES, in_water_b)
         next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
-        next_wb_heli_x = jnp.where(spawn_wb_heli, self.consts.OBJECT_SPAWN_X_FAR, next_wb_heli_x)
+        next_wb_heli_x = jnp.where(
+            spawn_wb_heli,
+            self.consts.GAME_AREA_MIN_X - self.consts.WB_HELI_WIDTH,
+            next_wb_heli_x,
+        ).astype(jnp.int32)
+
+        ## Steamship: the daylight scene's second phase only, back-to-back
+        ## passes from the right
+        spawn_ship, ship_timer = waterb_spawner(
+            next_ship_active, state.ship_timer,
+            self.consts.WC_SHIP_RESPAWN_FRAMES, ship_phase)
+        next_ship_active = next_ship_active | spawn_ship
+        next_ship_x = jnp.where(spawn_ship, self.consts.OBJECT_SPAWN_X_FAR, next_ship_x).astype(jnp.int32)
 
         ## The debris has no spawner of its own: it is born where the
         ## rocket bursts (handled above with the rocket lifecycle).
@@ -2387,6 +2790,7 @@ class JaxJamesBond(
             rocket_y=next_rocket_y,
             rocket_active=next_rocket_active,
             rocket_age=rocket_age,
+            rocket_launch_age=rocket_launch_age,
             rocket_timer=rocket_timer,
             submarine_x=next_submarine_x,
             submarine_active=next_submarine_active,
@@ -2395,11 +2799,30 @@ class JaxJamesBond(
             wb_heli_active=next_wb_heli_active,
             wb_heli_timer=wb_heli_timer,
             wb_flyer_x=next_wb_flyer_x,
+            wb_flyer_y=next_wb_flyer_y.astype(jnp.int32),
             wb_flyer_active=next_wb_flyer_active,
             wb_flyer_timer=wb_flyer_timer,
             sub_torp_x=next_torp_x,
             sub_torp_y=next_torp_y,
             sub_torp_active=next_torp_active,
+            sub_fired=next_sub_fired,
+            ## A fresh helicopter pass starts with a fresh bomb allowance.
+            ## Needed because the daylight scene chains passes back to
+            ## back, so the helicopter never goes inactive and the
+            ## per-pass counter would otherwise stick at its maximum.
+            helicopter_bombs_dropped=jnp.where(
+                spawn_helicopter, jnp.array(0, dtype=jnp.int32), state.helicopter_bombs_dropped
+            ),
+            helicopter_bomb_timer=jnp.where(
+                spawn_helicopter, jnp.array(0, dtype=jnp.int32), state.helicopter_bomb_timer
+            ),
+            ship_x=next_ship_x,
+            ship_active=next_ship_active,
+            ship_timer=ship_timer,
+            base_x=next_base_x.astype(jnp.int32),
+            base_active=next_base_active,
+            goal_x=next_goal_x.astype(jnp.int32),
+            goal_active=next_goal_active,
         )
 
     def _update_enemy_bombs(self, state: JamesBondState) -> JamesBondState:
@@ -2421,8 +2844,15 @@ class JaxJamesBond(
             state.helicopter_bomb_y + self.consts.HELICOPTER_BOMB_VY,
             -1,
         )
+        ## In the daylight scene the bomb keeps sinking well under the
+        ## surface (video: it fades around the submarine's depth)
+        bomb_floor = jnp.where(
+            state.stage == 3,
+            jnp.array(self.consts.WC_BOMB_FLOOR, dtype=jnp.int32),
+            jnp.array(ground, dtype=jnp.int32),
+        )
         heli_bomb_active = jnp.logical_and(
-            state.helicopter_bomb_active, heli_bomb_y < ground
+            state.helicopter_bomb_active, heli_bomb_y < bomb_floor
         )
 
         laser_x = jnp.where(state.satellite_laser_active, state.satellite_laser_x, -1)
@@ -2639,12 +3069,211 @@ class JaxJamesBond(
 
         state = self._resolve_player_bullet_collisions(state)
         state = self._resolve_player_wbullet_collisions(state)
+        state = self._resolve_waterb_ball_shot(state)
+        state = self._resolve_waterc_shots(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_splash_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
+        state = self._resolve_waterc_contacts(state)
         state = self._resolve_oil_rig_collision(state)
         return state
+
+    def _resolve_waterb_ball_shot(self, state: JamesBondState) -> JamesBondState:
+        """Water B: the anti-air shot pops the pink ball for 500.
+
+        The hit that completes WB_BALL_HITS_TO_EXIT starts the scene-clear
+        freeze instead of removing the ball: it hangs in its hit pose for
+        the whole colour cycle (video), and the freeze's end sweeps it.
+        """
+
+        ball_hit = jnp.logical_and(
+            jnp.logical_and(state.stage == 2, state.win_timer == 0),
+            jnp.logical_and(
+                jnp.logical_and(state.player_bullet_active, state.wb_heli_active),
+                _aabb_overlap(
+                    state.player_bullet_x, state.player_bullet_y,
+                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                    state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+                    self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT,
+                ),
+            ),
+        )
+        hits = state.wb_ball_hits + ball_hit.astype(jnp.int32)
+        final_hit = jnp.logical_and(ball_hit, hits >= self.consts.WB_BALL_HITS_TO_EXIT)
+        bullet_keep = state.player_bullet_active & (~ball_hit)
+
+        def park(keep, v):
+            return jnp.where(keep, v, jnp.array(-1, dtype=v.dtype))
+
+        return state.replace(
+            score=(state.score + ball_hit.astype(jnp.int32) * self.consts.SCORE_BALL).astype(jnp.int32),
+            wb_ball_hits=hits,
+            wb_heli_active=state.wb_heli_active & ((~ball_hit) | final_hit),
+            win_timer=jnp.where(
+                final_hit,
+                jnp.array(self.consts.WIN_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.win_timer,
+            ),
+            player_bullet_active=bullet_keep,
+            player_bullet_step=park(bullet_keep, state.player_bullet_step),
+            player_bullet_x=park(bullet_keep, state.player_bullet_x),
+            player_bullet_y=park(bullet_keep, state.player_bullet_y),
+        )
+
+    def _resolve_waterc_shots(self, state: JamesBondState) -> JamesBondState:
+        """Daylight scene: the player's rounds finally hit something.
+
+        Read off the longplay video: the anti-air shot destroys a climbing
+        rocket and the depth charge destroys a submerged or surfacing one,
+        +100 either way; the depth charge also sinks the submarine for
+        +200. Every score change in the footage came from these hits.
+        The used round is consumed on impact.
+        """
+
+        in_water_c = state.stage == 3
+
+        def rocket_hits(bx, by, active):
+            return jnp.logical_and(
+                jnp.logical_and(active, state.rocket_active),
+                _aabb_overlap(
+                    bx, by,
+                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                    state.rocket_x, state.rocket_y,
+                    self.consts.WC_ROCKET_WIDTH, self.consts.WC_ROCKET_HEIGHT,
+                ),
+            )
+
+        air_hits = jnp.logical_and(
+            in_water_c,
+            rocket_hits(state.player_bullet_x, state.player_bullet_y, state.player_bullet_active),
+        )
+        water_hits = jnp.logical_and(
+            in_water_c,
+            rocket_hits(state.player_wbullet_x, state.player_wbullet_y, state.player_wbullet_active),
+        )
+        rocket_hit = air_hits | water_hits
+        ## The anti-air shot also pops the falling / floating debris
+        debris_hits = jnp.logical_and(
+            jnp.logical_and(in_water_c, state.player_bullet_active),
+            jnp.logical_and(
+                state.wb_flyer_active,
+                _aabb_overlap(
+                    state.player_bullet_x, state.player_bullet_y,
+                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                    state.wb_flyer_x, state.wb_flyer_y,
+                    self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
+                ),
+            ),
+        )
+        sub_hit = jnp.logical_and(
+            jnp.logical_and(in_water_c, state.player_wbullet_active),
+            jnp.logical_and(
+                state.submarine_active,
+                _aabb_overlap(
+                    state.player_wbullet_x, state.player_wbullet_y,
+                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                    state.submarine_x, jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
+                    self.consts.SUBMARINE_WIDTH, self.consts.SUBMARINE_HEIGHT,
+                ),
+            ),
+        )
+        air_used = jnp.any(air_hits) | jnp.any(debris_hits)
+        water_used = jnp.any(water_hits) | sub_hit
+        gained = (
+            jnp.sum(rocket_hit.astype(jnp.int32)) * self.consts.SCORE_ROCKET_SHOT
+            + jnp.sum(debris_hits.astype(jnp.int32)) * self.consts.SCORE_DEBRIS_SHOT
+            + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
+        )
+
+        def park(keep, v):
+            return jnp.where(keep, v, jnp.array(-1, dtype=v.dtype))
+
+        air_keep = state.player_bullet_active & (~air_used)
+        water_keep = state.player_wbullet_active & (~water_used)
+        return state.replace(
+            score=(state.score + gained).astype(jnp.int32),
+            rocket_active=state.rocket_active & (~rocket_hit),
+            wb_flyer_active=state.wb_flyer_active & (~debris_hits),
+            submarine_active=state.submarine_active & (~sub_hit),
+            player_bullet_active=air_keep,
+            player_bullet_step=park(air_keep, state.player_bullet_step),
+            player_bullet_x=park(air_keep, state.player_bullet_x),
+            player_bullet_y=park(air_keep, state.player_bullet_y),
+            player_wbullet_active=water_keep,
+            player_wbullet_step=park(water_keep, state.player_wbullet_step),
+            player_wbullet_x=park(water_keep, state.player_wbullet_x),
+            player_wbullet_y=park(water_keep, state.player_wbullet_y),
+        )
+
+    def _resolve_waterc_contacts(self, state: JamesBondState) -> JamesBondState:
+        """Daylight scene contacts the other scenes do not have.
+
+        The falling / floating red debris and the steamship's deck and
+        hull cost a life; touching the green objective completes the
+        mission instead (the freeze and bonus run in the step loop).
+        A win outranks a death in the same frame.
+        """
+
+        in_water_c = state.stage == 3
+
+        def touch(ox, oy, ow, oh):
+            return _aabb_overlap(
+                state.player_x, state.player_y,
+                self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
+                ox, oy, ow, oh,
+            )
+
+        debris_hit = jnp.logical_and(
+            in_water_c,
+            jnp.any(jnp.logical_and(
+                state.wb_flyer_active,
+                touch(state.wb_flyer_x, state.wb_flyer_y,
+                      self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT),
+            )),
+        )
+        ship_hit = jnp.logical_and(
+            jnp.logical_and(in_water_c, state.ship_active),
+            touch(
+                state.ship_x, jnp.array(self.consts.WC_SHIP_HULL_TOP, dtype=jnp.int32),
+                self.consts.WC_SHIP_WIDTH,
+                self.consts.WC_SHIP_Y + self.consts.WC_SHIP_HEIGHT - self.consts.WC_SHIP_HULL_TOP,
+            ),
+        )
+        goal_hit = jnp.logical_and(
+            jnp.logical_and(in_water_c, state.goal_active),
+            touch(state.goal_x, jnp.array(self.consts.WC_GOAL_Y, dtype=jnp.int32),
+                  self.consts.WC_GOAL_WIDTH, self.consts.WC_GOAL_HEIGHT),
+        )
+        lethal = jnp.logical_and(
+            debris_hit | ship_hit,
+            jnp.logical_not(goal_hit),
+        )
+        can_take_damage = state.hit_cooldown <= 0
+        took_damage = jnp.logical_and(lethal, can_take_damage)
+        win = jnp.logical_and(goal_hit, state.win_timer == 0)
+
+        return state.replace(
+            goal_active=jnp.logical_and(state.goal_active, jnp.logical_not(goal_hit)),
+            win_timer=jnp.where(
+                win,
+                jnp.array(self.consts.WIN_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.win_timer,
+            ),
+            lives=jnp.maximum(
+                0, state.lives - took_damage.astype(jnp.int32)
+            ).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            death_timer=jnp.where(
+                took_damage,
+                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.death_timer,
+            ),
+        )
 
     def _resolve_oil_rig_collision(self, state: JamesBondState) -> JamesBondState:
         """Side contact with the oil rig is lethal; landing on top is handled
@@ -2707,11 +3336,17 @@ class JaxJamesBond(
                 ox, oy, ow, oh,
             )
 
-        rocket_hit = jnp.logical_and(
+        ## One entry per rocket slot; ramming pays only in water B (the
+        ## daylight scene scores through the player's rounds instead)
+        in_water_c = state.stage == 3
+        rocket_hit_slots = jnp.logical_and(
             state.rocket_active,
             touch(state.rocket_x, state.rocket_y,
-                  self.consts.ROCKET_WIDTH, self.consts.ROCKET_HEIGHT),
+                  jnp.where(in_water_c, self.consts.WC_ROCKET_WIDTH, self.consts.ROCKET_WIDTH),
+                  jnp.where(in_water_c, self.consts.WC_ROCKET_HEIGHT, self.consts.ROCKET_HEIGHT)),
         )
+        rocket_hit = jnp.any(rocket_hit_slots)
+        rocket_score = jnp.logical_and(rocket_hit, state.stage == 2)
         submarine_hit = jnp.logical_and(
             state.submarine_active,
             touch(state.submarine_x, jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
@@ -2722,16 +3357,25 @@ class JaxJamesBond(
             touch(state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
                   self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT),
         )
-        ## The red bars are rocket debris drifting far above the jump apex:
-        ## harmless wreckage, no collision.
+        ## The submarine's double-dot shot, on its diagonal or its run
+        ## along the surface, costs a life too
+        shot_hit = jnp.logical_and(
+            state.sub_torp_active,
+            touch(state.sub_torp_x, state.sub_torp_y,
+                  self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT),
+        )
+        ## Water B's red bars are rocket debris drifting far above the
+        ## jump apex: harmless wreckage there (the daylight scene's
+        ## falling debris is handled in _resolve_waterc_contacts).
 
-        any_hit = rocket_hit | submarine_hit | heli_hit
+        any_hit = rocket_hit | submarine_hit | heli_hit | shot_hit
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(any_hit, can_take_damage)
 
         return state.replace(
-            score=state.score + rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET,
-            rocket_active=jnp.logical_and(state.rocket_active, ~rocket_hit),
+            score=state.score + rocket_score.astype(jnp.int32) * self.consts.SCORE_ROCKET,
+            rocket_active=jnp.logical_and(state.rocket_active, ~rocket_hit_slots),
+            sub_torp_active=jnp.logical_and(state.sub_torp_active, ~shot_hit),
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
@@ -2978,9 +3622,11 @@ class JaxJamesBond(
         """
 
     def _get_done(self, state: JamesBondState) -> chex.Array:
+        ## Stage 4 is not a scene: the mission-complete freeze sets it
+        ## once the bonus has paid out, so the episode ends there.
         return jnp.logical_or(
             state.lives <= 0,
-            state.stage >= 3, ## TODO: Change / Take into account
+            state.stage >= 4,
         )
 
 
@@ -3024,12 +3670,21 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = self.jr.create_object_raster(self.BACKGROUND)
 
-        ## Both water scenes have a gray sky covering the measured rows
-        ## 29-120, meeting the water at 121; it goes under the stars so
-        ## the stars still twinkle on it like in the real scenes
+        ## The first two water scenes have a gray sky covering the measured
+        ## rows 29-120, meeting the water at 121; it goes under the stars
+        ## so the stars still twinkle on it like in the real scenes. The
+        ## daylight scene paints the same band blue, with clouds and no stars.
         raster = jax.lax.cond(
-            state.stage >= 1,
+            jnp.logical_or(state.stage == 1, state.stage == 2),
             lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['water_sky']),
+            lambda r: r,
+            raster,
+        )
+        raster = jax.lax.cond(
+            state.stage >= 3,
+            lambda r: self._render_clouds(
+                self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['wc_sky']), state
+            ),
             lambda r: r,
             raster,
         )
@@ -3042,6 +3697,28 @@ class JamesBondRenderer(JAXGameRenderer):
                 state.death_timer >= self.consts.DEATH_ANIMATION_FRAMES - 2,
             ),
             lambda r: self.jr.render_at_clipped(r, 4, 29, self.SHAPE_MASKS['death_flash']),
+            lambda r: r,
+            raster,
+        )
+        ## Water B's scene-clear freeze: the sky flickers between the two
+        ## grays for its first WB_EXIT_FLICKER_FRAMES frames (video: an
+        ## irregular dark/light strobe, then the plain sky while the boat
+        ## keeps colour-cycling)
+        flicker = jnp.logical_and(
+            state.stage == 2,
+            state.win_timer > self.consts.WIN_ANIMATION_FRAMES - self.consts.WB_EXIT_FLICKER_FRAMES,
+        )
+        flicker_sprite = jnp.where(state.win_timer % 3 == 0, 0, 1)
+        raster = jax.lax.cond(
+            jnp.logical_and(flicker, state.win_timer % 3 != 2),
+            lambda r: jax.lax.switch(
+                flicker_sprite,
+                [
+                    lambda rr: self.jr.render_at_clipped(rr, 4, 29, self.SHAPE_MASKS['sky_flash']),
+                    lambda rr: self.jr.render_at_clipped(rr, 4, 29, self.SHAPE_MASKS['death_flash']),
+                ],
+                r,
+            ),
             lambda r: r,
             raster,
         )
@@ -3067,7 +3744,12 @@ class JamesBondRenderer(JAXGameRenderer):
             size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
             return self.jr.draw_rects(r, pos, size, 13)  # id 13 = white (236,236,236) - visible flash over grey sky
         raster = jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
-        raster = self._render_stars(raster, state)
+        raster = jax.lax.cond(
+            state.stage < 3,
+            lambda r: self._render_stars(r, state),
+            lambda r: r,
+            raster,
+        )
         ## Terrain follows the scene: dry land in stage 0, water in stage 1
         raster = jax.lax.cond(
             state.stage == 0,
@@ -3143,31 +3825,66 @@ class JamesBondRenderer(JAXGameRenderer):
         sits at the bottom of the water body.
         """
 
-        ## The second water scene runs the same layout with darker water.
-        ## The water surface is row 121 in the real game: the boat's hull
-        ## (119-122) rides half above, half below the waterline.
-        raster = jax.lax.cond(
-            state.stage == 2,
-            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water_b']),
-            lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water']),
+        ## The second water scene runs the same layout with darker water,
+        ## the daylight scene with navy water. The water surface is row
+        ## 121 in the real game: the boat's hull (119-122) rides half
+        ## above, half below the waterline.
+        water_idx = jnp.clip(state.stage - 1, 0, 2)
+        raster = jax.lax.switch(
+            water_idx,
+            [
+                lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water']),
+                lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['water_b']),
+                lambda r: self.jr.render_at_clipped(r, 4, 121, self.SHAPE_MASKS['wc_water']),
+            ],
             raster,
         )
         ## The seabed is a 160px repeating strip that scrolls left with the
         ## world, 1px every 4th frame. Drawing the pattern twice, one strip
-        ## width apart, keeps the wrap seamless.
+        ## width apart, keeps the wrap seamless. The daylight scene uses
+        ## the green recolor, and its hills stop once the sunken base
+        ## scrolls in (video: flat seabed under the base).
         scroll = (state.step_count // 4) % 160
-        raster = self.jr.render_at_clipped(
+
+        def draw_seabed(r, mask_name):
+            r = self.jr.render_at_clipped(
+                r,
+                4 - scroll,
+                158,  # y - measured seabed top row
+                self.SHAPE_MASKS[mask_name],
+            )
+            return self.jr.render_at_clipped(
+                r,
+                4 - scroll + 160,
+                158,
+                self.SHAPE_MASKS[mask_name],
+            )
+
+        return jax.lax.cond(
+            state.stage >= 3,
+            lambda r: jax.lax.cond(
+                state.base_active,
+                lambda rr: rr,
+                lambda rr: draw_seabed(rr, 'wc_seabed'),
+                r,
+            ),
+            lambda r: draw_seabed(r, 'seabed'),
             raster,
-            4 - scroll,
-            158,  # y - measured seabed top row
-            self.SHAPE_MASKS['seabed'],
         )
-        return self.jr.render_at_clipped(
-            raster,
-            4 - scroll + 160,
-            158,
-            self.SHAPE_MASKS['seabed'],
-        )
+
+    def _render_clouds(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Daylight sky: two clouds per 160px strip, a low one and, 62px
+        to its right, a high one, drifting left at 0.5 px/frame -- twice
+        the seabed scroll (video parallax). Drawn twice for a seamless wrap.
+        """
+
+        scroll = (state.step_count // 2) % 160
+        for strip in (0, 160):
+            raster = self.jr.render_at_clipped(
+                raster, 4 - scroll + strip, 43, self.SHAPE_MASKS["wc_cloud"])
+            raster = self.jr.render_at_clipped(
+                raster, 4 - scroll + strip + 62, 30, self.SHAPE_MASKS["wc_cloud"])
+        return raster
 
     def _render_scuba(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw normal scuba or the satellite-drop radioactive figure.
@@ -3309,29 +4026,72 @@ class JamesBondRenderer(JAXGameRenderer):
             )
 
         ## The rocket burst flashes the whole sky gray for a frame or two
+        ## (water B only; no flash was visible in the daylight footage)
         raster = one(
             raster,
             jnp.logical_and(
-                state.wb_flyer_active,
-                state.wb_flyer_timer < self.consts.SKY_FLASH_FRAMES,
+                state.stage == 2,
+                jnp.any(jnp.logical_and(
+                    state.wb_flyer_active,
+                    state.wb_flyer_timer < self.consts.SKY_FLASH_FRAMES,
+                )),
             ),
             jnp.array(4, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
         )
-        raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
+        ## Daylight ending: the sunken base and the objective above it
+        raster = one(raster, state.base_active, state.base_x,
+                     jnp.array(self.consts.WC_BASE_Y, dtype=jnp.int32), 'wc_base')
+        raster = one(raster, state.goal_active, state.goal_x,
+                     jnp.array(self.consts.WC_GOAL_Y, dtype=jnp.int32), 'wc_goal')
+        ## Rocket pads and their debris, one draw per slot. Water B keeps
+        ## its ALE-extracted 8x11 rocket; the daylight scene draws the
+        ## small pyramid, with its flame while it climbs.
+        in_water_c = state.stage == 3
+        rocket_flying = state.rocket_age >= state.rocket_launch_age
+        ## Daylight debris that reached the waterline is drawn as the
+        ## red / pink sparkle, its two dot patterns swapping every few
+        ## frames (video); everywhere else the two red bars are drawn.
+        splash_pose = (state.step_count // self.consts.WC_SPLASH_FLIP_FRAMES) % 2
+        debris_resting = in_water_c & (state.wb_flyer_y >= self.consts.WC_DEBRIS_REST_Y)
+        for slot in range(self.consts.WC_ROCKET_SLOTS):
+            raster = one(raster, state.rocket_active[slot] & (~in_water_c),
+                         state.rocket_x[slot], state.rocket_y[slot], 'rocket')
+            raster = one(raster, state.rocket_active[slot] & in_water_c & (~rocket_flying[slot]),
+                         state.rocket_x[slot], state.rocket_y[slot], 'wc_rocket')
+            raster = one(raster, state.rocket_active[slot] & in_water_c & rocket_flying[slot],
+                         state.rocket_x[slot], state.rocket_y[slot], 'wc_rocket_fire')
+            raster = one(raster, state.wb_flyer_active[slot] & (~debris_resting[slot]),
+                         state.wb_flyer_x[slot], state.wb_flyer_y[slot], 'flyer_red')
+            raster = jax.lax.cond(
+                state.wb_flyer_active[slot] & debris_resting[slot],
+                lambda r, s=slot: self.jr.render_at_clipped(
+                    r, state.wb_flyer_x[s] - 1,
+                    jnp.array(self.consts.WC_SPLASH_Y, dtype=jnp.int32),
+                    self.SHAPE_MASKS['wc_splash'][splash_pose]),
+                lambda r: r,
+                raster,
+            )
         raster = one(raster, state.submarine_active, state.submarine_x,
                      jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32), 'submarine')
-        raster = one(raster, state.wb_heli_active, state.wb_heli_x,
-                     jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32), 'heli_pink')
-        ## Rocket debris: the two red bars linger where it burst
-        raster = one(raster, state.wb_flyer_active, state.wb_flyer_x,
-                     jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32), 'flyer_red')
-        ## Submarine torpedo: short underwater dart
+        ## Pink ball: solid / striped poses alternate in flight; during
+        ## the scene-clear freeze it hangs in the striped (hit) pose
+        ball_pose = jnp.where(
+            state.win_timer > 0,
+            1,
+            (state.step_count // 8) % 2,
+        )
         raster = jax.lax.cond(
-            state.sub_torp_active,
-            lambda r: self.jr.render_at_clipped(r, state.sub_torp_x, state.sub_torp_y, self.SHAPE_MASKS['bullet'][0]),
+            state.wb_heli_active,
+            lambda r: self.jr.render_at_clipped(
+                r, state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+                self.SHAPE_MASKS['wb_ball'][ball_pose]),
             lambda r: r,
             raster,
         )
+        raster = one(raster, state.ship_active, state.ship_x,
+                     jnp.array(self.consts.WC_SHIP_Y, dtype=jnp.int32), 'wc_ship')
+        ## Submarine shot: the two stacked yellow dots
+        raster = one(raster, state.sub_torp_active, state.sub_torp_x, state.sub_torp_y, 'sub_shot')
 
         return raster
 
@@ -3368,9 +4128,12 @@ class JamesBondRenderer(JAXGameRenderer):
         sprite's per-frame color roll.
         """
 
+        ## The mission-complete freeze at the end of the daylight scene
+        ## runs the very same colour cycle (video), just without a death.
+        cycle_timer = jnp.maximum(state.death_timer, state.win_timer)
         sprite_idx = jnp.where(
-            state.death_timer > 0,
-            1 + (state.death_timer * 5) % 3,
+            cycle_timer > 0,
+            1 + (cycle_timer * 5) % 3,
             jnp.where(
                 state.hit_cooldown > 0,
                 jnp.where(state.step_count % 2 == 0, 1, 2),
