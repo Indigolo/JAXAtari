@@ -127,3 +127,63 @@ the session scratchpad (`reports/*.md`) if deeper numbers are ever needed.
   underwater dart from the submarine, dies before the surface, harmless
   in all 40 probe branches.
 - Helicopter bombs landing in water spawn nothing at all.
+
+## Addendum: third water scene ("water C", daylight) — from video only
+
+Source: a scrubbed YouTube longplay (`Screen Recording 2026-08-13 at
+23.17.30.mov`, scene at 1:47–3:00), NOT ALE. Rows are calibrated on the
+waterline (121) and are good to ~3 rows; speeds come from 5–60 fps
+samples. The water-B exit was never seen (the video cuts from a water-B
+death straight into this scene with +5000 on the counter), so the JAX
+version hands over on a clock (`STAGE_WB_LENGTH`).
+
+| element | video |
+|---|---|
+| sky | solid blue (70,80,207) down to the waterline, no stars |
+| clouds | white 17x9, two per 160px strip ~62px apart (low ~row 36, high ~row 23), scrolling **0.5 px/f** — twice the seabed |
+| water / seabed | (15,47,144); 160px hill strip, green over brown, 0.25 px/f |
+| rocket pads | small gray pyramid (5x8, 5-row flame while climbing); **up to two** in the water at random columns, riding the scroll; climb 1 px/f (still drifting with the world), burst near row 61 |
+| debris | falls ~1 row/f back to the waterline (the anti-air shot pops it there for **+100**, video 13500→13600), then floats ~40 f as a red/pink sparkle of 2-5 dots on a 6x3 footprint, two patterns swapping every ~6 f, and vanishes; treated as lethal |
+| shots | anti-air (+2,−2) kills a climbing rocket, the sinking depth charge kills a submerged/surfacing one: **+100** each; the depth charge sinks the submarine: **+200**. Only these scored in 70 s |
+| submarine | enters from the **left**, cruises right ~0.7 px/f (implemented 2px/3f) at ~row 146; its shot (see the water-B addendum) is shared with water B |
+| helicopter | red land heli, ~0.6 px/f constant, back-to-back passes; its bomb keeps sinking to ~row 140 |
+| steamship | second phase only (rockets stop ~2800 f in): 16 wide on the waterline, red hull / yellow deck / gray funnel + smoke, 0.6 px/f right→left, back-to-back; player dived under it (lethality assumed) |
+| absent | satellite, diamond, scuba, frogman, oil rig, pink heli, stars |
+| ending | after ~3960 f the hills stop, a 31x26 orange base scrolls in (0.25 px/f); when it reaches ~x66 a green 8x18 objective appears ~20px right of its left edge near row 144, drifting left only ~0.05 px/f; diving into it freezes the scene for the death-style colour cycle, then **+5000** and the title screen (3 lives still shown) |
+
+Easy misreading, checked at 60 fps and NOT in the footage: a
+submarine-launched shot that rises to the surface and splits into two
+bombs. The yellow bar rising above the submarine is the helicopter's
+bomb passing under water; the dark bar is the player's own depth charge.
+
+## Addendum: how water B ends (second recording, 60 fps read)
+
+Scene names by stage index: [0] land, [1] water A / oil rig, [2] water B
+(dark, big rockets, pink balls), [3] water C (daylight). The old note
+"Water B never ended in a 22k-frame probe" was because nobody shot the
+balls.
+
+- The **pink ball** (9x11, two poses alternating) enters at the **left**
+  edge at row 57 and crosses right at **1.75 px/f** (7 px / 4 f), on a
+  ~250-frame cycle. The anti-air shot pops it: **+500**.
+- The footage shows three pops (6000→6500, 6700→7200, 7600→8100) before
+  the exit; on the last one the ball stays on screen in its striped pose,
+  the world freezes for **59 frames** while the boat colour-cycles and
+  the sky strobes dark/light for the first ~21 frames, then **+5000**
+  (8100→13100) and the daylight scene starts. `WB_BALL_HITS_TO_EXIT`
+  holds the count (3 here; the team's reading was 2).
+- The same freeze + 5000 pattern closes every scene (rig landing,
+  ball count, daylight objective).
+- Rocket rams in water B still pay +200 (seen three times in the clip).
+
+## Addendum: the submarine's shot (third recording, water B)
+
+Applies to water B and the daylight scene alike. The submarine enters at
+the **left** and cruises right (~0.6 px/f) in water B too, so the old
+right-to-left dart in the code was wrong. As it passes mid-screen it fires
+**two yellow 2x2 dots stacked with a one-row gap** (2x5) from its bow: the
+pair runs back and up diagonally until it sits just under the waterline
+(~row 124), then straight left along that row at ~1.3 px/f (implemented
+4 px / 3 f) until it leaves the screen. It passes under a surfaced hull
+and crosses a diving boat's path. The earlier "torpedo that splits into
+two red bombs" was a misreading and has been replaced by this.
