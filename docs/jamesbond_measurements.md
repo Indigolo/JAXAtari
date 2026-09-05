@@ -63,14 +63,20 @@ aim-once, never homing, indestructible.
   iff the drop column is **1..95px to the right of the player's hull** —
   never from behind. One laser in the air at a time.
 
-**Laser splash / frogman** (Water A): the bolt keeps sinking under water to
-y~134-137, then a green frogman surfaces at [laser_x, laser_x+19] straddling
-the surface, riding the world scroll (0.25 px/f left). Kill window: boat x in
-[laser_x−9, laser_x+19]; flying clears it, **diving does not**.
+**Laser splash / frogman** (Water A): with no scuba diver on screen, the bolt
+keeps sinking under water to y~134-137, then a green frogman surfaces at
+[laser_x, laser_x+19] straddling the surface and riding the world scroll
+(0.25 px/f left). Kill window: boat x in [laser_x−9, laser_x+19]; flying
+clears it, **diving does not**. If a scuba diver is present, the spent bolt
+instead disappears normally and creates no radioactive splash.
 
 **Scuba diver** (Water A): a vertical 7x20 swimmer entering from the right at
 depth y131-150, swimming left 0.25 px/f, animating every 15 frames, vanishing
 mid-screen on an age clock (~333 frames clean). Dangerous to a diving boat.
+The player's water projectile does not remove the diver. When the visible gap
+between the player's boat and scuba is at most 40 horizontal pixels, the diver
+changes immediately into the same radioactive narrow/wide figure created by a
+satellite drop; this proximity transition is independent of the satellite bolt.
 
 **Water B roster** (all sprites cropped from real frames): the surface rocket
 (idles riding the scroll, then ignites and launches skyward; +200 for ramming
@@ -110,7 +116,9 @@ the session scratchpad (`reports/*.md`) if deeper numbers are ever needed.
 - **The "radioactive bolt"**: a bolt landing while a frogman lives spawns
   nothing new — it sinks below the waterline recolored green, and the
   living frogman's despawn clock restarts (life extended to landing+120).
-  The deep scuba diver is visibly unaffected by landings.
+  A scuba diver suppresses the bolt-to-frogman conversion entirely. The diver
+  itself changes to its radioactive state when the player's boat is nearby,
+  regardless of whether a bolt is airborne or landing.
 - **Water-B rocket cycle (256 frames)**: floats submerged (tip ~y140),
   climbs exactly 1px/frame, single-frame splash blip at the waterline,
   explodes at tip y61 into two red debris bars (the "red flyer" of the
