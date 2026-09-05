@@ -114,3 +114,42 @@ def test_final_ball_freezes_pays_bonus_and_starts_daylight(env):
     assert int(state.wb_ball_hits) == 0
     assert int(state.stage_start_step) == frozen_step
     assert int(state.win_timer) == 0
+
+
+def test_anti_air_shot_destroys_water_b_rocket_for_200(env):
+    """Third recording, 60 fps: the shot touches the climbing rocket at
+    row 97 and the counter goes 6500 -> 6700 as it vanishes."""
+
+    consts = env.consts
+    state = _quiet(env)
+    state = state.replace(
+        rocket_active=state.rocket_active.at[0].set(True),
+        rocket_x=state.rocket_x.at[0].set(60),
+        rocket_y=state.rocket_y.at[0].set(90),
+        rocket_age=state.rocket_age.at[0].set(200),
+        rocket_launch_age=state.rocket_launch_age.at[0].set(10),
+        player_bullet_active=jnp.array(True),
+        player_bullet_step=jnp.array(5, dtype=jnp.int32),
+        player_bullet_x=jnp.array(56, dtype=jnp.int32),
+        player_bullet_y=jnp.array(98, dtype=jnp.int32),
+    )
+    state = _run(env, state, 4)
+    assert not bool(state.rocket_active[0])
+    assert int(state.score) == consts.SCORE_ROCKET
+    assert not bool(state.player_bullet_active)
+    assert not bool(jnp.any(state.wb_flyer_active))
+
+
+def test_depth_charge_sinks_water_b_submarine(env):
+    consts = env.consts
+    state = _quiet(env).replace(
+        submarine_active=jnp.array(True),
+        submarine_x=jnp.array(40, dtype=jnp.int32),
+        player_wbullet_active=jnp.array(True),
+        player_wbullet_step=jnp.array(20, dtype=jnp.int32),
+        player_wbullet_x=jnp.array(44, dtype=jnp.int32),
+        player_wbullet_y=jnp.array(consts.SUBMARINE_Y - 2, dtype=jnp.int32),
+    )
+    state = _run(env, state, 3)
+    assert not bool(state.submarine_active)
+    assert int(state.score) == consts.SCORE_SUBMARINE_SHOT

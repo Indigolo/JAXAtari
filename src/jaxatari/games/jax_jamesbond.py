@@ -3070,7 +3070,7 @@ class JaxJamesBond(
         state = self._resolve_player_bullet_collisions(state)
         state = self._resolve_player_wbullet_collisions(state)
         state = self._resolve_waterb_ball_shot(state)
-        state = self._resolve_waterc_shots(state)
+        state = self._resolve_water_shots(state)
         state = self._resolve_bullet_player_collisions(state)
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_splash_player_collisions(state)
@@ -3121,17 +3121,23 @@ class JaxJamesBond(
             player_bullet_y=park(bullet_keep, state.player_bullet_y),
         )
 
-    def _resolve_waterc_shots(self, state: JamesBondState) -> JamesBondState:
-        """Daylight scene: the player's rounds finally hit something.
+    def _resolve_water_shots(self, state: JamesBondState) -> JamesBondState:
+        """Water B and C: the player's rounds finally hit something.
 
-        Read off the longplay video: the anti-air shot destroys a climbing
-        rocket and the depth charge destroys a submerged or surfacing one,
-        +100 either way; the depth charge also sinks the submarine for
-        +200. Every score change in the footage came from these hits.
-        The used round is consumed on impact.
+        Read off the longplay videos: the anti-air shot destroys a climbing
+        rocket and the depth charge a submerged or surfacing one -- worth
+        200 in water B (6500 -> 6700 the moment the shot touched it) and
+        100 in the daylight scene; the depth charge also sinks the
+        submarine for 200, and in the daylight scene the anti-air shot
+        pops the falling debris for 100. The used round is consumed on
+        impact.
         """
 
+        in_water_b = state.stage == 2
         in_water_c = state.stage == 3
+        in_scene = in_water_b | in_water_c
+        rocket_w = jnp.where(in_water_c, self.consts.WC_ROCKET_WIDTH, self.consts.ROCKET_WIDTH)
+        rocket_h = jnp.where(in_water_c, self.consts.WC_ROCKET_HEIGHT, self.consts.ROCKET_HEIGHT)
 
         def rocket_hits(bx, by, active):
             return jnp.logical_and(
@@ -3140,19 +3146,20 @@ class JaxJamesBond(
                     bx, by,
                     self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
                     state.rocket_x, state.rocket_y,
-                    self.consts.WC_ROCKET_WIDTH, self.consts.WC_ROCKET_HEIGHT,
+                    rocket_w, rocket_h,
                 ),
             )
 
         air_hits = jnp.logical_and(
-            in_water_c,
+            in_scene,
             rocket_hits(state.player_bullet_x, state.player_bullet_y, state.player_bullet_active),
         )
         water_hits = jnp.logical_and(
-            in_water_c,
+            in_scene,
             rocket_hits(state.player_wbullet_x, state.player_wbullet_y, state.player_wbullet_active),
         )
         rocket_hit = air_hits | water_hits
+        rocket_value = jnp.where(in_water_c, self.consts.SCORE_ROCKET_SHOT, self.consts.SCORE_ROCKET)
         ## The anti-air shot also pops the falling / floating debris
         debris_hits = jnp.logical_and(
             jnp.logical_and(in_water_c, state.player_bullet_active),
@@ -3167,7 +3174,7 @@ class JaxJamesBond(
             ),
         )
         sub_hit = jnp.logical_and(
-            jnp.logical_and(in_water_c, state.player_wbullet_active),
+            jnp.logical_and(in_scene, state.player_wbullet_active),
             jnp.logical_and(
                 state.submarine_active,
                 _aabb_overlap(
@@ -3181,7 +3188,7 @@ class JaxJamesBond(
         air_used = jnp.any(air_hits) | jnp.any(debris_hits)
         water_used = jnp.any(water_hits) | sub_hit
         gained = (
-            jnp.sum(rocket_hit.astype(jnp.int32)) * self.consts.SCORE_ROCKET_SHOT
+            jnp.sum(rocket_hit.astype(jnp.int32)) * rocket_value
             + jnp.sum(debris_hits.astype(jnp.int32)) * self.consts.SCORE_DEBRIS_SHOT
             + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
         )

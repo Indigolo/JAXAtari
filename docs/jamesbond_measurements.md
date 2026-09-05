@@ -174,7 +174,9 @@ balls.
   holds the count (3 here; the team's reading was 2).
 - The same freeze + 5000 pattern closes every scene (rig landing,
   ball count, daylight objective).
-- Rocket rams in water B still pay +200 (seen three times in the clip).
+- The water-B rocket is shootable: in the third recording the anti-air shot
+  touches the climbing rocket at ~row 97 and it vanishes with **+200**
+  (6500→6700). Rams still pay the same 200.
 
 ## Addendum: the submarine's shot (third recording, water B)
 
