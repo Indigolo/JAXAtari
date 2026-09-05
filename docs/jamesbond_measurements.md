@@ -73,10 +73,14 @@ instead disappears normally and creates no radioactive splash.
 **Scuba diver** (Water A): a vertical 7x20 swimmer entering from the right at
 depth y131-150, swimming left 0.25 px/f, animating every 15 frames, vanishing
 mid-screen on an age clock (~333 frames clean). Dangerous to a diving boat.
-The player's water projectile does not remove the diver. When the visible gap
-between the player's boat and scuba is at most 40 horizontal pixels, the diver
-changes immediately into the same radioactive narrow/wide figure created by a
-satellite drop; this proximity transition is independent of the satellite bolt.
+The depth charge removes the diver for +200 (team decision, overriding the
+earlier ALE note). When the visible gap between the player's boat and scuba is
+at most 40 horizontal pixels, the diver changes immediately into the same
+radioactive narrow/wide figure created by a satellite drop, drawn straddling
+the waterline like that splash (row 123) and hittable there; this proximity
+transition is independent of the satellite bolt. Team rules: only one thing
+is radioactive at a time, and once the first diver has appeared in the scene
+the satellite bolt never splashes again.
 
 **Water B roster** (all sprites cropped from real frames): the surface rocket
 (idles riding the scroll, then ignites and launches skyward; +200 for ramming
