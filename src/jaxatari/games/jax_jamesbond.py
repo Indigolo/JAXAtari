@@ -3532,7 +3532,7 @@ class JaxJamesBond(
             ),
         )
 
-    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState: ## TODO: Change this to true score gaining function
+    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
         """Collect active diamonds that overlap a player shot.
 
         Both shots count: the land round and the water anti-air round fly
@@ -3567,7 +3567,7 @@ class JaxJamesBond(
 
         return state.replace(
             diamond_shot=collected,
-            diamond_active = jnp.logical_and( ## TODO: change diamond x and y?
+            diamond_active = jnp.logical_and(
                 state.diamond_active, ~collected
             ),
             player_bullet_active=player_bullet_active,
@@ -3578,13 +3578,42 @@ class JaxJamesBond(
         )
 
     def scuba_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """The water projectile does not remove or otherwise change scuba.
 
-        Scuba radioactivity is controlled only by player proximity. Keeping
-        this no-op in the collision pipeline makes that rule explicit and
-        prevents the old shot-to-despawn behavior from returning.
-        """
-        return state
+        overlap = _aabb_overlap(
+            state.player_wbullet_x,
+            state.player_wbullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.scuba_x,
+            state.scuba_y,
+            self.consts.SCUBA_WIDTH,
+            self.consts.SCUBA_HEIGHT,
+        )
+
+        hit = jnp.logical_and(
+            jnp.logical_and(state.scuba_active, state.player_wbullet_active),
+            overlap,
+        )
+
+        player_wbullet_active = jnp.logical_and(
+            state.player_wbullet_active, ~hit
+        )
+
+        new_score = state.score + hit * self.consts.SCORE_SCUBA
+
+        def park(active, v):
+            return jnp.where(active, v, -1)
+
+        return state.replace(
+            scuba_active = jnp.logical_and(
+                state.scuba_active, ~hit
+            ),
+            player_wbullet_active=player_wbullet_active,
+            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
+            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
+            score=new_score
+        )
     
     def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
         return lax.cond(
