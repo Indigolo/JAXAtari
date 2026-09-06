@@ -134,6 +134,9 @@ the session scratchpad (`reports/*.md`) if deeper numbers are ever needed.
 
 ## Addendum: third water scene ("water C", daylight) — from video only
 
+> Reference only: the project stops at water B, so this scene is not
+> implemented. The notes stay for whoever picks it up later.
+
 Source: a scrubbed YouTube longplay (`Screen Recording 2026-08-13 at
 23.17.30.mov`, scene at 1:47–3:00), NOT ALE. Rows are calibrated on the
 waterline (121) and are good to ~3 rows; speeds come from 5–60 fps
