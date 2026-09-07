@@ -80,16 +80,22 @@ def get_default_asset_config() -> tuple:
             {'name': 'water_b', 'type': 'single', 'file': 'water_b.npy'},
             {'name': 'sky_flash', 'type': 'single', 'file': 'sky_flash.npy'}, ## whole sky flashes gray when the rocket bursts
             {'name': 'death_flash', 'type': 'single', 'file': 'death_flash.npy'}, ## the sky's one-frame flash on a water death
-            {'name': 'rocket', 'type': 'single', 'file': 'rocket.npy'},
-            {'name': 'submarine', 'type': 'single', 'file': 'submarine.npy'},
+            {
+                'name': 'rocket', 'type': 'group', 
+                'files': ['rocket_w_ignition.npy', 'rocket_wo_ignition.npy']
+            },
+            {
+                'name': 'submarine', 'type': 'group', 
+                'files': ['boat_left.npy', 'boat_right.npy']
+            },
             ## Water B's pink ball (the old "pink helicopter"): a 9x11
             ## sphere block-sampled from the longplay, solid and striped
             ## poses alternating in flight.
             {
                 'name': 'wb_ball', 'type': 'group',
-                'files': ['wb_ball_1.npy', 'wb_ball_2.npy']
+                'files': ['ball_sideways.npy', 'ball_frontal.npy']
             },
-            {'name': 'flyer_red', 'type': 'single', 'file': 'flyer_red.npy'},
+            {'name': 'rocket_ball', 'type': 'single', 'file': 'rocket_ball.npy'},
             {
                 'name': 'scuba', 'type': 'group',
                 'files': ['scuba_1.npy', 'scuba_2.npy']
@@ -108,7 +114,7 @@ def get_default_asset_config() -> tuple:
             },
             ## The submarine's shot: two yellow 2x2 dots stacked with a gap
             ## (block-sampled from the longplay)
-            {'name': 'sub_shot', 'type': 'single', 'file': 'sub_shot.npy'},
+            {'name': 'sub_shot', 'type': 'single', 'file': 'sub_shot.npy'}, ## TODO: Change to group with new
             ## Rocket debris that reached the waterline: a red / pink
             ## sparkle alternating between two dot patterns (video)
             {
@@ -608,7 +614,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -3614,18 +3620,39 @@ class JamesBondRenderer(JAXGameRenderer):
             ),
             jnp.array(4, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
         )
-        raster = one(raster, state.rocket_active, state.rocket_x, state.rocket_y, 'rocket')
-        raster = one(raster, state.submarine_active, state.submarine_x,
-                     jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32), 'submarine')
-        ## Pink ball: solid / striped poses alternate in flight
-        ball_pose = (state.step_count // 8) % 2
-        raster = jax.lax.cond(
-            state.wb_heli_active,
-            lambda r: self.jr.render_at_clipped(
-                r, state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
-                self.SHAPE_MASKS['wb_ball'][ball_pose]),
-            lambda r: r,
+        
+        index_switch = (state.step_count // 8) % 2
+
+        def render_if_active(raster, active, x, y, mask):
+            return jax.lax.cond(
+                active,
+                lambda r: self.jr.render_at_clipped(r, x, y, mask),
+                lambda r: r,
+                raster,
+            )
+
+        raster = render_if_active(
             raster,
+            state.submarine_active,
+            state.submarine_x,
+            self.consts.SUBMARINE_Y,
+            self.SHAPE_MASKS["submarine"][index_switch],
+        )
+
+        raster = render_if_active(
+            raster,
+            state.rocket_active,
+            state.rocket_x,
+            state.rocket_y,
+            self.SHAPE_MASKS["rocket"][index_switch],
+        )
+
+        raster = render_if_active(
+            raster,
+            state.wb_heli_active,
+            state.wb_heli_x,
+            jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+            self.SHAPE_MASKS["wb_ball"][index_switch],
         )
         ## Rocket debris: the two red bars while falling, the red / pink
         ## sparkle (two dot patterns swapping every few frames) once it
@@ -3633,7 +3660,7 @@ class JamesBondRenderer(JAXGameRenderer):
         debris_resting = state.wb_flyer_y >= self.consts.DEBRIS_REST_Y
         splash_pose = (state.step_count // self.consts.DEBRIS_SPLASH_FLIP_FRAMES) % 2
         raster = one(raster, state.wb_flyer_active & (~debris_resting),
-                     state.wb_flyer_x, state.wb_flyer_y, 'flyer_red')
+                     state.wb_flyer_x, state.wb_flyer_y, 'rocket_ball')
         raster = jax.lax.cond(
             state.wb_flyer_active & debris_resting,
             lambda r: self.jr.render_at_clipped(
