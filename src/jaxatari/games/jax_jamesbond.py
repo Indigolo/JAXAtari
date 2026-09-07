@@ -392,7 +392,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SUB_FIRE_X: int = struct.field(pytree_node=False, default=70)
     SUB_SHOT_LEVEL_Y: int = struct.field(pytree_node=False, default=124)
     SUB_SHOT_WIDTH: int = struct.field(pytree_node=False, default=2)
-    SUB_SHOT_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    SUB_SHOT_HEIGHT: int = struct.field(pytree_node=False, default=8)
 
     ## Rocket debris, team decision on top of the ALE-measured burst: the
     ## two red bars fall 1px/frame back to the waterline, float there for
@@ -2992,7 +2992,7 @@ class JaxJamesBond(
         ## along the surface, costs a life too
         shot_hit = jnp.logical_and(
             state.sub_torp_active,
-            touch(state.sub_torp_x, state.sub_torp_y,
+            touch(state.sub_torp_x, state.sub_torp_y - 3, ## Hits higher than the sprite size
                   self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT),
         )
         ## The rocket debris (falling or floating) is handled in
@@ -3413,7 +3413,7 @@ class JamesBondRenderer(JAXGameRenderer):
         
         ## Render Score counter
         score_digits = self.jr.int_to_digits(state.score, 5)
-        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 4) ## TODO: Position offset per digit?
+        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 5) ## TODO: Position offset per digit?
 
         return self.jr.render_from_palette(raster, self.PALETTE)
 
