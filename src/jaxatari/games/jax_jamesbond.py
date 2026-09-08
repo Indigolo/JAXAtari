@@ -114,7 +114,10 @@ def get_default_asset_config() -> tuple:
             },
             ## The submarine's shot: two yellow 2x2 dots stacked with a gap
             ## (block-sampled from the longplay)
-            {'name': 'sub_shot', 'type': 'single', 'file': 'sub_shot.npy'}, ## TODO: Change to group with new
+            {
+                'name': 'sub_shot', 'type': 'group', 
+                'files': ['boat_bullet_wide.npy', 'boat_bullet_sideways.npy']
+            },
             ## Rocket debris that reached the waterline: a red / pink
             ## sparkle alternating between two dot patterns (video)
             {
@@ -3623,7 +3626,7 @@ class JamesBondRenderer(JAXGameRenderer):
         
         index_switch = (state.step_count // 8) % 2
 
-        def render_if_active(raster, active, x, y, mask):
+        def render_with_switch(raster, active, x, y, mask):
             return jax.lax.cond(
                 active,
                 lambda r: self.jr.render_at_clipped(r, x, y, mask),
@@ -3631,7 +3634,7 @@ class JamesBondRenderer(JAXGameRenderer):
                 raster,
             )
 
-        raster = render_if_active(
+        raster = render_with_switch(
             raster,
             state.submarine_active,
             state.submarine_x,
@@ -3639,7 +3642,7 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS["submarine"][index_switch],
         )
 
-        raster = render_if_active(
+        raster = render_with_switch(
             raster,
             state.rocket_active,
             state.rocket_x,
@@ -3647,12 +3650,20 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS["rocket"][index_switch],
         )
 
-        raster = render_if_active(
+        raster = render_with_switch(
             raster,
             state.wb_heli_active,
             state.wb_heli_x,
-            jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+            self.consts.WB_HELI_Y,
             self.SHAPE_MASKS["wb_ball"][index_switch],
+        )
+
+        raster = render_with_switch(
+            raster,
+            state.sub_torp_active,
+            state.sub_torp_x,
+            state.sub_torp_y,
+            self.SHAPE_MASKS["sub_shot"][index_switch],
         )
         ## Rocket debris: the two red bars while falling, the red / pink
         ## sparkle (two dot patterns swapping every few frames) once it
@@ -3661,17 +3672,14 @@ class JamesBondRenderer(JAXGameRenderer):
         splash_pose = (state.step_count // self.consts.DEBRIS_SPLASH_FLIP_FRAMES) % 2
         raster = one(raster, state.wb_flyer_active & (~debris_resting),
                      state.wb_flyer_x, state.wb_flyer_y, 'rocket_ball')
-        raster = jax.lax.cond(
-            state.wb_flyer_active & debris_resting,
-            lambda r: self.jr.render_at_clipped(
-                r, state.wb_flyer_x - 1,
-                jnp.array(self.consts.DEBRIS_SPLASH_Y, dtype=jnp.int32),
-                self.SHAPE_MASKS['debris_splash'][splash_pose]),
-            lambda r: r,
+
+        raster = render_with_switch(
             raster,
+            jnp.logical_and(state.wb_flyer_active, debris_resting),
+            state.wb_flyer_x - 1,
+            self.consts.DEBRIS_SPLASH_Y,
+            self.SHAPE_MASKS["debris_splash"][splash_pose],
         )
-        ## Submarine shot: the two stacked yellow dots
-        raster = one(raster, state.sub_torp_active, state.sub_torp_x, state.sub_torp_y, 'sub_shot')
 
         return raster
 
