@@ -192,10 +192,6 @@ class JamesBondConstants(struct.PyTreeNode):
 
     DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=8) ##TODO: There is 8 pixels in the diamond sprite, including the shining thing of diamond
     DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=11) ##TODO: There is 11 pixels in the diamond sprite, including the shining thing of diamond 
-    ## TODO: Change / Remove after observation and collision enemey variables have been changed; or else will cause fail tests
-    ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
-    ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
-    ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
     HELICOPTER_MELEE_SPRITE_STEPS = jnp.array([ ## 2nd elements are x positions of sprites. Follows the sequence: Sprite 1 -> Nothing -> Sprite 1 -> Nothing -> Sprite 2 -> ...
@@ -334,7 +330,7 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_LEFT_X: int = struct.field(pytree_node=False, default=45)         ## left appear column (player is to its right)
     OIL_RIG_Y: int = struct.field(pytree_node=False, default=100)             ## top-left y: deck at waterline, legs in water
     OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=24)     ## flash length; also the rig visible window
-    OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=1500) ## rig can't appear until 1500+ steps into the water scene
+    OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=4000) ## rig can't appear until 4000+ steps into the water scene
     OIL_RIG_RIGHT_SLIDE: int = struct.field(pytree_node=False, default=12)    ## px the rig drifts left while visible on the right
     OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
     OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
@@ -621,7 +617,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -1927,11 +1923,6 @@ class JaxJamesBond(
         )
 
         switch = state.stage != new_stage
-        stage2_start_step = jnp.where(
-            jnp.logical_and(new_stage == 1, switch),
-            state.step_count,
-            state.stage2_start_step
-        )
 
         def clear(v, park):
             return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
@@ -2284,9 +2275,6 @@ class JaxJamesBond(
 
         # === 2. Spawning logic ===
         ## Stage 1 (water) delay timing logic for scuba and oil rig
-        in_stage2 = state.stage == 1
-        stage2_started = state.stage2_start_step >= 0
-        since_stage2 = state.step_count - state.stage2_start_step
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
         on_land = state.stage == 0
@@ -2367,8 +2355,8 @@ class JaxJamesBond(
             jnp.maximum(state.scuba_respawn_timer - 1, 0),
         )
         scuba_delay_passed = jnp.logical_and(
-            in_stage2,
-            jnp.logical_and(stage2_started, since_stage2 >= 1500)
+            in_water,
+            steps_into_stage1 >= 1500
         )
         spawn_scuba = in_water & (~next_scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed)
         next_scuba_active = next_scuba_active | spawn_scuba
@@ -2411,10 +2399,6 @@ class JaxJamesBond(
             next_diamond_y
         )
         # Oil rig
-        oil_rig_delay_passed = jnp.logical_and(
-            in_stage2,
-            jnp.logical_and(stage2_started, since_stage2 >= 4000)
-        )
         # Position the rig at its fixed spot whenever the window (set above)
         ## has it active. The window alone owns active/inactive now.
         next_oil_rig_y = jnp.where(
@@ -3189,7 +3173,7 @@ class JaxJamesBond(
             state.diamond_x,
             state.diamond_y,
             self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT,
+            self.consts.DIAMOND_COLLISION_HEIGHT + 1,
         )
 
         collected = jnp.logical_and(
