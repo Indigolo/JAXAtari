@@ -190,8 +190,12 @@ class JamesBondConstants(struct.PyTreeNode):
     ## episode before the dock bonus could ever pay out.
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=20000)
 
-    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=7) ##TODO: There is 7 pixels in the diamond sprite, including the shining thing of diamond
-    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=13) ##TODO: There is 13 pixels in the diamond sprite, including the shining thing of diamond 
+    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=8) ##TODO: There is 8 pixels in the diamond sprite, including the shining thing of diamond
+    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=11) ##TODO: There is 11 pixels in the diamond sprite, including the shining thing of diamond 
+    ## TODO: Change / Remove after observation and collision enemey variables have been changed; or else will cause fail tests
+    ENEMY_WIDTH: int = struct.field(pytree_node=False, default=10)
+    ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=8)
+    ## TODO: Enemies (now i only have the helicopter and satellite enemies)
     HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
     HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
     HELICOPTER_MELEE_SPRITE_STEPS = jnp.array([ ## 2nd elements are x positions of sprites. Follows the sequence: Sprite 1 -> Nothing -> Sprite 1 -> Nothing -> Sprite 2 -> ...
@@ -218,8 +222,8 @@ class JamesBondConstants(struct.PyTreeNode):
     # near-misses do not register, matching how the original game feels.
     PLAYER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < PLAYER_WIDTH 8
     PLAYER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=3)  ## < PLAYER_HEIGHT 4
-    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=4)  ## < DIAMOND_WIDTH 7
-    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < DIAMOND_HEIGHT 13
+    DIAMOND_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=5)  ## < DIAMOND_WIDTH 8
+    DIAMOND_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=6) ## < DIAMOND_HEIGHT 11
     HELICOPTER_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)  ## < HELICOPTER_ENEMY_WIDTH 8
     HELICOPTER_COLLISION_HEIGHT: int = struct.field(pytree_node=False, default=4) ## < HELICOPTER_ENEMY_HEIGHT 6
     SATELLITE_COLLISION_WIDTH: int = struct.field(pytree_node=False, default=6)   ## < SATELLITE_ENEMY_WIDTH 8
@@ -660,18 +664,18 @@ class JaxJamesBond(
             death_timer=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.array(0, dtype=jnp.int32),
             diamond_y=jnp.array(0, dtype=jnp.int32),
-            diamond_active=jnp.array(0, dtype=jnp.bool_),
+            diamond_active=jnp.array(False, dtype=jnp.bool_),
             pit_x=jnp.array(0, dtype=jnp.int32),
             pit_y=jnp.array(0, dtype=jnp.int32),
             pit_active=jnp.array(False, dtype=jnp.bool_),
             spawn_diamond_next=jnp.array(False, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional? Setting False here will make helicopter spawn first, which is true?
             helicopter_x=jnp.array(0, dtype=jnp.int32),
             helicopter_y=jnp.array(0, dtype=jnp.int32),
-            helicopter_active=jnp.array(0, dtype=jnp.bool_),
+            helicopter_active=jnp.array(False, dtype=jnp.bool_),
             helicopter_melee_step=jnp.array(0, dtype=jnp.int32),
             satellite_x=jnp.array(0, dtype=jnp.int32),
             satellite_y=jnp.array(0, dtype=jnp.int32),
-            satellite_active=jnp.array(0, dtype=jnp.bool_),
+            satellite_active=jnp.array(False, dtype=jnp.bool_),
             helicopter_bomb_x=jnp.array(-1, dtype=jnp.int32),
             helicopter_bomb_y=jnp.array(-1, dtype=jnp.int32),
             helicopter_bomb_vx=jnp.array(0, dtype=jnp.int32),
@@ -1923,6 +1927,11 @@ class JaxJamesBond(
         )
 
         switch = state.stage != new_stage
+        stage2_start_step = jnp.where(
+            jnp.logical_and(new_stage == 1, switch),
+            state.step_count,
+            state.stage2_start_step
+        )
 
         def clear(v, park):
             return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
@@ -2274,6 +2283,10 @@ class JaxJamesBond(
         next_pit_active = state.pit_active & pit_on_screen
 
         # === 2. Spawning logic ===
+        ## Stage 1 (water) delay timing logic for scuba and oil rig
+        in_stage2 = state.stage == 1
+        stage2_started = state.stage2_start_step >= 0
+        since_stage2 = state.step_count - state.stage2_start_step
         ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
         on_land = state.stage == 0
@@ -2353,7 +2366,11 @@ class JaxJamesBond(
             jnp.array(self.consts.SCUBA_RESPAWN_FRAMES, dtype=jnp.int32),
             jnp.maximum(state.scuba_respawn_timer - 1, 0),
         )
-        spawn_scuba = in_water & (~next_scuba_active) & (scuba_respawn_timer == 0)
+        scuba_delay_passed = jnp.logical_and(
+            in_stage2,
+            jnp.logical_and(stage2_started, since_stage2 >= 1500)
+        )
+        spawn_scuba = in_water & (~next_scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed)
         next_scuba_active = next_scuba_active | spawn_scuba
         next_scuba_x = jnp.where(
             spawn_scuba,
@@ -2394,15 +2411,10 @@ class JaxJamesBond(
             next_diamond_y
         )
         # Oil rig
-        ## Oil rig visibility countdown
-        ##next_oil_rig_visible_timer = jnp.maximum(state.oil_rig_visible_timer - 1, 0)
-        ## Trigger visibility flash when player scores on diamond or scuba
-        ## Have to pass 'scored_points_this_frame' boolean from collision
-        ##next_oil_rig_visible_timer = jnp.where(
-        ##    scored_points_this_frame & state.oil_rig_active,
-        ##    self.consts.OIL_RIG_FLASH_FRAMES, # Placeholder for N frames
-        ##    next_oil_rig_visible_timer
-        ##)
+        oil_rig_delay_passed = jnp.logical_and(
+            in_stage2,
+            jnp.logical_and(stage2_started, since_stage2 >= 4000)
+        )
         # Position the rig at its fixed spot whenever the window (set above)
         ## has it active. The window alone owns active/inactive now.
         next_oil_rig_y = jnp.where(
@@ -3196,7 +3208,7 @@ class JaxJamesBond(
 
         return state.replace(
             diamond_shot=collected,
-            diamond_active = jnp.logical_and(
+            diamond_active = jnp.logical_and( ## TODO: change diamond x and y? 
                 state.diamond_active, ~collected
             ),
             player_bullet_active=player_bullet_active,
