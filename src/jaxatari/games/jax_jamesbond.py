@@ -617,7 +617,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -3170,10 +3170,10 @@ class JaxJamesBond(
             state.player_bullet_y,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            state.diamond_x,
+            state.diamond_x + 1, ## For better hit boxes
             state.diamond_y,
             self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT + 1,
+            self.consts.DIAMOND_COLLISION_HEIGHT + 1, ## For better hit boxes
         )
 
         collected = jnp.logical_and(
