@@ -3209,6 +3209,7 @@ class JaxJamesBond(
         body at his depth, or -- once he is radioactive -- the 20x7 splash
         figure straddling the waterline.
         """
+        diver_active = jnp.logical_and(state.scuba_active, ~state.scuba_radioactive)
 
         box_x = jnp.where(state.scuba_radioactive, state.scuba_x - 4, state.scuba_x)
         box_y = jnp.where(
@@ -3227,7 +3228,7 @@ class JaxJamesBond(
         )
 
         hit = jnp.logical_and(
-            jnp.logical_and(state.scuba_active, state.player_wbullet_active),
+            jnp.logical_and(diver_active, state.player_wbullet_active),
             overlap,
         )
 
