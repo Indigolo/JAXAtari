@@ -2741,8 +2741,9 @@ class JaxJamesBond(
     def _resolve_collisions(self, state: JamesBondState) -> JamesBondState:
         """Run all collision systems after movement and object updates."""
 
-        state = self._resolve_player_bullet_collisions(state)
-        state = self._resolve_player_wbullet_collisions(state)
+        state = self._resolve_bullet_diamond_collisions(state)
+        state = self._resolve_wbullet_scuba_collisions(state)
+        state = self._resolve_bullet_oil_rig_collisions(state)
         state = self._resolve_waterb_ball_shot(state)
         state = self._resolve_water_shots(state)
         state = self._resolve_bullet_player_collisions(state)
@@ -3252,19 +3253,91 @@ class JaxJamesBond(
             player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
             score=new_score
         )
+
+    def oil_rig_collisions_logic(self, state: JamesBondState) -> JamesBondState:
+        """
+        Player bullets hitting the oil rig should disappear. Might be useful to indicate that the invisible oil rig is there.
+        """
+        bullet_overlap = _aabb_overlap(
+            state.player_bullet_x,
+            state.player_bullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.oil_rig_x,
+            state.oil_rig_y,
+            self.consts.OIL_RIG_WIDTH,
+            self.consts.OIL_RIG_HEIGHT
+        )
+
+        wbullet_overlap = _aabb_overlap(
+            state.player_wbullet_x,
+            state.player_wbullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.oil_rig_x,
+            state.oil_rig_y,
+            self.consts.OIL_RIG_WIDTH,
+            self.consts.OIL_RIG_HEIGHT
+        )
+
+        hit = (
+            state.oil_rig_active
+            & state.player_bullet_active
+            & bullet_overlap
+        )
+
+        w_hit = (
+            state.oil_rig_active
+            & state.player_wbullet_active
+            & wbullet_overlap
+        )
+
+        player_bullet_active = jnp.logical_and(
+            state.player_bullet_active, ~hit
+        )
+
+        player_wbullet_active = jnp.logical_and(
+            state.player_wbullet_active, ~w_hit
+        )
+
+        def park(active, v):
+            return jnp.where(active, v, -1)
+
+        return state.replace(
+            player_bullet_active=player_bullet_active,
+            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
+            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
+            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
+
+            player_wbullet_active=player_wbullet_active,
+            player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
+            player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
+            player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
+        )
     
-    def _resolve_player_bullet_collisions(self, state: JamesBondState) -> JamesBondState:
+    def _resolve_bullet_diamond_collisions(self, state: JamesBondState) -> JamesBondState:
         return lax.cond(
-            state.player_bullet_active,
+            jnp.logical_and(state.player_bullet_active, state.diamond_active),
             self.collectible_collisions_logic,
             lambda s: s,
             state
         )
 
-    def _resolve_player_wbullet_collisions(self, state: JamesBondState) -> JamesBondState:
+    def _resolve_wbullet_scuba_collisions(self, state: JamesBondState) -> JamesBondState:
         return lax.cond(
-            state.player_wbullet_active,
+            jnp.logical_and(state.player_wbullet_active, state.scuba_active),
             self.scuba_collisions_logic,
+            lambda s: s,
+            state
+        )
+
+    def _resolve_bullet_oil_rig_collisions(self, state: JamesBondState) -> JamesBondState:
+        return lax.cond(
+            jnp.logical_and(
+                jnp.logical_or(state.player_bullet_active, state.player_wbullet_active),
+                state.oil_rig_active
+            ),
+            self.oil_rig_collisions_logic,
             lambda s: s,
             state
         )
