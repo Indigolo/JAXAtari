@@ -332,6 +332,7 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=24)     ## flash length; also the rig visible window
     OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=4000) ## rig can't appear until 4000+ steps into the water scene
     OIL_RIG_RIGHT_SLIDE: int = struct.field(pytree_node=False, default=12)    ## px the rig drifts left while visible on the right
+    OIL_RIG_LEFT_SLIDE: int = struct.field(pytree_node=False, default=12)     ## px the rig drifts left while visible on the left (consistent motion)
     OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
     OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
     OIL_RIG_STRIKE_FRAMES: int = struct.field(pytree_node=False, default=75) ## brief bright flash length
@@ -806,6 +807,10 @@ class JaxJamesBond(
                 wb_heli_active=sweep(state.wb_heli_active, False),
                 wb_flyer_active=sweep(state.wb_flyer_active, False),
                 sub_torp_active=sweep(state.sub_torp_active, False),
+                ## A new life gets a fresh shot at the oil rig: clear the
+                ## once-per-scene latch (and any leftover sequence) on respawn.
+                oil_rig_done=sweep(state.oil_rig_done, False),
+                oil_rig_seq=sweep(state.oil_rig_seq, 0),
                 ## The pit resets to its measured post-death position
                 pit_x=sweep(state.pit_x, 124),
                 hit_cooldown=sweep(state.hit_cooldown, 0),
@@ -2101,11 +2106,16 @@ class JaxJamesBond(
         right_span = jnp.maximum(self.consts.OIL_RIG_SEQ_TOTAL - self.consts.OIL_RIG_SEQ_RIGHT_END, 1)
         right_prog = (self.consts.OIL_RIG_SEQ_TOTAL - oil_rig_seq).astype(jnp.int32)
         right_x = self.consts.OIL_RIG_RIGHT_X - (right_prog * self.consts.OIL_RIG_RIGHT_SLIDE) // right_span
+        ## The LEFT appearance also drifts left, so it reads as the same rig
+        ## moving right-to-left, not a static pop-in (consistent motion).
+        left_span = jnp.maximum(self.consts.OIL_RIG_SEQ_LEFT_START, 1)
+        left_prog = (self.consts.OIL_RIG_SEQ_LEFT_START - oil_rig_seq).astype(jnp.int32)
+        left_x = self.consts.OIL_RIG_LEFT_X - (left_prog * self.consts.OIL_RIG_LEFT_SLIDE) // left_span
         next_oil_rig_x = jnp.where(
             on_right,
             right_x.astype(jnp.int32),
             jnp.where(on_left,
-                      jnp.array(self.consts.OIL_RIG_LEFT_X, dtype=jnp.int32),
+                      left_x.astype(jnp.int32),
                       state.oil_rig_x),
         )
 
@@ -2286,7 +2296,7 @@ class JaxJamesBond(
         # also patrols the first water scene, dropping the same bombs
         # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
         # per crossing). Only the second water scene retires it.
-        spawn_diamond = row_57_empty & (state.spawn_diamond_next | in_water_b)
+        spawn_diamond = row_57_empty & state.spawn_diamond_next & (~in_water_b)
         ## The helicopter spawning will be delayed by 75 frames from initial state
         helicopter_delay_passed = state.step_count >= 75
         spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active) & (helicopter_delay_passed)
@@ -2952,6 +2962,11 @@ class JaxJamesBond(
                 jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
                 state.death_timer,
             ),
+            ## Crashing into the rig decommissions it -- it disappears on
+            ## contact like other objects, while the player also dies.
+            oil_rig_seq=jnp.where(
+                side_hit, jnp.array(0, dtype=jnp.int32), state.oil_rig_seq
+            ),
         )
 
     def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -3417,28 +3432,7 @@ class JamesBondRenderer(JAXGameRenderer):
             lambda r: r,
             raster,
         )
-        ## Bright full-screen flash for the first few frames as the oil rig
-        ## arrives -- a quick strike, while the rig itself lingers after.
-        ## Flash fires at BOTH appearances: the first few frames of the RIGHT
-        ## phase and the first few frames of the LEFT phase, keyed to oil_rig_seq.
-        _strike = self.consts.OIL_RIG_STRIKE_LEN
-        flash_right = jnp.logical_and(
-            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_TOTAL,
-            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_TOTAL - _strike,
-        )
-        flash_left = jnp.logical_and(
-            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
-            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_LEFT_START - _strike,
-        )
-        rig_flash = jnp.logical_and(
-            state.stage == 1,
-            jnp.logical_or(flash_right, flash_left),
-        )
-        def _rig_flash(r):
-            pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
-            size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
-            return self.jr.draw_rects(r, pos, size, 13)  # id 13 = white (236,236,236) - visible flash over grey sky
-        raster = jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
+        raster = self._render_oil_rig_flash(raster, state)
         raster = self._render_stars(raster, state)
         ## Terrain follows the scene: dry land in stage 0, water in stage 1
         raster = jax.lax.cond(
@@ -3662,6 +3656,30 @@ class JamesBondRenderer(JAXGameRenderer):
             )
 
         return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
+
+    def _render_oil_rig_flash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+        """Bright full-screen flash for the first few frames as the oil rig
+        arrives -- a quick strike, while the rig itself lingers after. Fires at
+        BOTH appearances: the first few frames of the RIGHT phase and of the
+        LEFT phase, keyed to oil_rig_seq."""
+        _strike = self.consts.OIL_RIG_STRIKE_LEN
+        flash_right = jnp.logical_and(
+            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_TOTAL,
+            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_TOTAL - _strike,
+        )
+        flash_left = jnp.logical_and(
+            state.oil_rig_seq <= self.consts.OIL_RIG_SEQ_LEFT_START,
+            state.oil_rig_seq > self.consts.OIL_RIG_SEQ_LEFT_START - _strike,
+        )
+        rig_flash = jnp.logical_and(
+            state.stage == 1,
+            jnp.logical_or(flash_right, flash_left),
+        )
+        def _rig_flash(r):
+            pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
+            size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
+            return self.jr.draw_rects(r, pos, size, 13)  # id 13 = white (236,236,236)
+        return jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
 
     def _render_oil_rig(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the oil rig sprite while it is active (glimpsed in the flash)."""
