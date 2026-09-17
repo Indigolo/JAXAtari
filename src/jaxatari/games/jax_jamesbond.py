@@ -322,20 +322,12 @@ class JamesBondConstants(struct.PyTreeNode):
     ## Oil rig, sprite is a static 16x22
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
     OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
-    OIL_RIG_APPEAR_FRAME: int = struct.field(pytree_node=False, default=420) ## frames into the water scene before the rig shows
-    OIL_RIG_SEQ_TOTAL: int = struct.field(pytree_node=False, default=150)     ## total frames of the appear-right/gap/appear-left sequence
-    OIL_RIG_SEQ_RIGHT_END: int = struct.field(pytree_node=False, default=120)  ## seq value where the RIGHT phase ends
-    OIL_RIG_SEQ_LEFT_START: int = struct.field(pytree_node=False, default=105) ## seq value where the LEFT phase begins
+    OIL_RIG_SEQ_TOTAL: int = struct.field(pytree_node=False, default=60)      ## visible for two seconds at 30 fps; scroll continues while hidden
     OIL_RIG_RIGHT_X: int = struct.field(pytree_node=False, default=120)       ## right appear column
-    OIL_RIG_LEFT_X: int = struct.field(pytree_node=False, default=45)         ## left appear column (player is to its right)
     OIL_RIG_Y: int = struct.field(pytree_node=False, default=100)             ## top-left y: deck at waterline, legs in water
-    OIL_RIG_STRIKE_LEN: int = struct.field(pytree_node=False, default=24)     ## flash length; also the rig visible window
     OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=4000) ## rig can't appear until 4000+ steps into the water scene
-    OIL_RIG_RIGHT_SLIDE: int = struct.field(pytree_node=False, default=12)    ## px the rig drifts left while visible on the right
-    OIL_RIG_LEFT_SLIDE: int = struct.field(pytree_node=False, default=12)     ## px the rig drifts left while visible on the left (consistent motion)
-    OIL_RIG_TOP_LAND_MARGIN: int = struct.field(pytree_node=False, default=4) ## how close to the rig top counts as landing
-    OIL_RIG_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60) ## how long the rig is glimpsed in the flash
-    OIL_RIG_STRIKE_FRAMES: int = struct.field(pytree_node=False, default=75) ## brief bright flash length
+    DIAMOND_FLASH_FRAMES: int = struct.field(pytree_node=False, default=6) ## 0.2 seconds at 30 fps
+    STAGE_TRANSITION_FRAMES: int = struct.field(pytree_node=False, default=30) ## one-second completion flash before water B
 
     ## Second water scene (after the dock bonus): darker water and a fresh
     ## enemy roster, all sprites cropped from real ALE frames. The floating
@@ -348,8 +340,8 @@ class JamesBondConstants(struct.PyTreeNode):
     ## appears mid-screen already submerged (tip row ~140), floats a few
     ## frames, climbs at exactly 1px/frame straight up (a single-frame
     ## splash blip marks the waterline crossing), and EXPLODES with its
-    ## tip at row 61 into two red debris bars that linger in the sky,
-    ## plus a 1-2 frame full-sky gray flash. One rocket every 256 frames.
+    ## tip at row 61. It remains visible in a brief gray flash, then
+    ## disappears without dropping debris. One rocket every 256 frames.
     ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
     ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
     ROCKET_Y: int = struct.field(pytree_node=False, default=138) ## rests low in the water; a diving boat can ram it
@@ -357,8 +349,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
-    DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120) ## ALE-measured linger; unused now that the bars fall
-    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=2) ## whole sky flashes gray on the burst
+    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
@@ -378,9 +369,7 @@ class JamesBondConstants(struct.PyTreeNode):
     WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
     SCORE_BALL: int = struct.field(pytree_node=False, default=500)
     WB_BALL_HITS_TO_EXIT: int = struct.field(pytree_node=False, default=3)
-    ## The "small red flyer" of the early survey turned out to be the
-    ## rocket's explosion debris (two stacked 4x2 red bars), not an enemy
-    ## of its own: it spawns where the rocket bursts and drifts harmlessly.
+    ## Legacy dimensions for the retired debris observation slot.
     WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
     WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
     WB_FLYER_HEIGHT: int = struct.field(pytree_node=False, default=5)
@@ -398,15 +387,6 @@ class JamesBondConstants(struct.PyTreeNode):
     SUB_SHOT_WIDTH: int = struct.field(pytree_node=False, default=2)
     SUB_SHOT_HEIGHT: int = struct.field(pytree_node=False, default=8)
 
-    ## Rocket debris, team decision on top of the ALE-measured burst: the
-    ## two red bars fall 1px/frame back to the waterline, float there for
-    ## a moment as a red/pink sparkle (two dot patterns from the video),
-    ## then vanish. Lethal on contact; the anti-air shot pops them.
-    DEBRIS_REST_Y: int = struct.field(pytree_node=False, default=119)
-    DEBRIS_REST_FRAMES: int = struct.field(pytree_node=False, default=40)
-    DEBRIS_SPLASH_Y: int = struct.field(pytree_node=False, default=118)
-    DEBRIS_SPLASH_FLIP_FRAMES: int = struct.field(pytree_node=False, default=6) ## pattern swap cadence
-    SCORE_DEBRIS_SHOT: int = struct.field(pytree_node=False, default=100)
     ## The depth charge sinks the submarine (longplay: +200 each time)
     SCORE_SUBMARINE_SHOT: int = struct.field(pytree_node=False, default=200)
 
@@ -482,6 +462,8 @@ class JamesBondState:
     stage: chex.Array
     hit_cooldown: chex.Array
     death_timer: chex.Array ## frames left in the freeze-everything death animation
+    sky_flash_timer: chex.Array ## diamond hit or rocket burst, independent of rig visibility
+    stage_transition_timer: chex.Array ## freezes the completed scene before the hand-off
     diamond_x: chex.Array
     diamond_y: chex.Array
     diamond_active: chex.Array
@@ -526,10 +508,12 @@ class JamesBondState:
     oil_rig_x: chex.Array
     oil_rig_y: chex.Array
     oil_rig_active: chex.Array
-    oil_rig_visible: chex.Array  ## flash-only: rig is DRAWN only during the flash frames
-    oil_rig_done: chex.Array     ## latch: rig already appeared this water scene (blocks re-trigger)
+    oil_rig_visible: chex.Array  ## visibility expires; the hidden rig still scrolls with the seabed
+    oil_rig_done: chex.Array     ## mirrors an ongoing attempt; clears when the rig scrolls off-screen
+    oil_rig_landing_timer: chex.Array  ## legacy state slot, kept at zero; leaving the screen ends an attempt
+    oil_rig_obstacles_remaining: chex.Array  ## legacy state slot, kept at zero; next diamond may retry
     stage1_start_step: chex.Array   ## step_count at the moment the water scene (stage 1) began
-    oil_rig_seq: chex.Array      ## countdown driving the appear-right / gap / appear-left sequence (0 = idle)
+    oil_rig_seq: chex.Array      ## visibility countdown; does not control movement or landing lifetime
     diamond_shot: chex.Array     ## True the frame a diamond is shot; triggers the rig next frame
     ## Second water scene roster
     rocket_x: chex.Array
@@ -544,9 +528,9 @@ class JamesBondState:
     wb_heli_active: chex.Array
     wb_heli_timer: chex.Array
     wb_ball_hits: chex.Array ## pink balls shot this scene (water B exit counter)
-    ## Rocket explosion debris (the two red bars); timer is its age
+    ## Retired debris slot stays inactive; retain the observation layout.
     wb_flyer_x: chex.Array
-    wb_flyer_y: chex.Array ## the bars fall from the burst row to the waterline
+    wb_flyer_y: chex.Array ## retired debris slot, kept for observation/checkpoint compatibility
     wb_flyer_active: chex.Array
     wb_flyer_timer: chex.Array
     ## Submarine's double-dot shot
@@ -659,6 +643,8 @@ class JaxJamesBond(
             stage=jnp.array(self.consts.START_STAGE, dtype=jnp.int32),
             hit_cooldown=jnp.array(0, dtype=jnp.int32),
             death_timer=jnp.array(0, dtype=jnp.int32),
+            sky_flash_timer=jnp.array(0, dtype=jnp.int32),
+            stage_transition_timer=jnp.array(0, dtype=jnp.int32),
             diamond_x=jnp.array(0, dtype=jnp.int32),
             diamond_y=jnp.array(0, dtype=jnp.int32),
             diamond_active=jnp.array(False, dtype=jnp.bool_),
@@ -704,6 +690,8 @@ class JaxJamesBond(
             oil_rig_active=jnp.array(False, dtype=jnp.bool_),
             oil_rig_visible=jnp.array(False, dtype=jnp.bool_),
             oil_rig_done=jnp.array(False, dtype=jnp.bool_),
+            oil_rig_landing_timer=jnp.array(0, dtype=jnp.int32),
+            oil_rig_obstacles_remaining=jnp.array(0, dtype=jnp.int32),
             stage1_start_step=jnp.array(0, dtype=jnp.int32),
             oil_rig_seq=jnp.array(0, dtype=jnp.int32),
             diamond_shot=jnp.array(False, dtype=jnp.bool_),
@@ -750,13 +738,33 @@ class JaxJamesBond(
                 ## offset derives from this counter.
                 step_count=state.step_count + 1,
                 hit_cooldown=jnp.maximum(state.hit_cooldown - 1, 0),
+                sky_flash_timer=jnp.maximum(state.sky_flash_timer - 1, 0),
             )
             state = self._update_stage(state)
-            state = self._step_player(state, atari_action)
-            state = self._update_objects(state)
-            state = self._update_enemy_bombs(state)
-            state = self._resolve_collisions(state)
-            return state
+
+            def advance_scene(state):
+                before_movement = state
+                state = self._step_player(state, atari_action)
+                state = self._update_objects(state)
+                state = self._resolve_oil_rig_landing(before_movement, state)
+
+                def resolve_hazards(state):
+                    state = self._update_enemy_bombs(state)
+                    return self._resolve_collisions(state)
+
+                ## Reveal on the exact landing frame, before any damage.
+                return jax.lax.cond(
+                    state.stage_transition_timer > 0, lambda s: s, resolve_hazards, state
+                )
+
+            ## A successful landing freezes immediately, before any hazards move.
+            return jax.lax.cond(state.stage_transition_timer > 0, lambda s: s, advance_scene, state)
+
+        def transition_step(state: JamesBondState) -> JamesBondState:
+            ## Keep the scene still for the completion flash. _update_stage
+            ## performs the hand-off on the final tick, clearing the rig.
+            state = self._update_stage(state)
+            return state.replace(stage_transition_timer=jnp.maximum(state.stage_transition_timer - 1, 0))
 
         def frozen_step(state: JamesBondState) -> JamesBondState:
             """The death animation: the whole scene stands still while the
@@ -800,6 +808,9 @@ class JaxJamesBond(
                 satellite_active=sweep(state.satellite_active, False),
                 satellite_laser_active=sweep(state.satellite_laser_active, False),
                 diamond_active=sweep(state.diamond_active, False),
+                diamond_shot=sweep(state.diamond_shot, False),
+                ## Hit flashes finish even when a death freezes the scene.
+                sky_flash_timer=jnp.maximum(state.sky_flash_timer - 1, 0),
                 scuba_active=sweep(state.scuba_active, False),
                 splash_active=sweep(state.splash_active, False),
                 rocket_active=sweep(state.rocket_active, False),
@@ -808,15 +819,25 @@ class JaxJamesBond(
                 wb_flyer_active=sweep(state.wb_flyer_active, False),
                 sub_torp_active=sweep(state.sub_torp_active, False),
                 ## A new life gets a fresh shot at the oil rig: clear the
-                ## once-per-scene latch (and any leftover sequence) on respawn.
+                ## current attempt and its hidden landing target on respawn.
                 oil_rig_done=sweep(state.oil_rig_done, False),
                 oil_rig_seq=sweep(state.oil_rig_seq, 0),
+                oil_rig_landing_timer=sweep(state.oil_rig_landing_timer, 0),
+                oil_rig_obstacles_remaining=sweep(state.oil_rig_obstacles_remaining, 0),
+                oil_rig_active=sweep(state.oil_rig_active, False),
+                oil_rig_visible=sweep(state.oil_rig_visible, False),
+                oil_rig_x=sweep(state.oil_rig_x, -1),
+                oil_rig_y=sweep(state.oil_rig_y, -1),
                 ## The pit resets to its measured post-death position
                 pit_x=sweep(state.pit_x, 124),
                 hit_cooldown=sweep(state.hit_cooldown, 0),
             )
 
-        state = jax.lax.cond(state.death_timer > 0, frozen_step, live_step, state)
+        state = jax.lax.cond(
+            state.death_timer > 0, frozen_step,
+            lambda s: jax.lax.cond(s.stage_transition_timer > 0, transition_step, live_step, s),
+            state,
+        )
 
         _, next_key = jax.random.split(state.key)
         state = state.replace(key=next_key)
@@ -1904,25 +1925,15 @@ class JaxJamesBond(
         lives_lost = self.consts.MAX_LIVES - state.lives
 
         new_stage = jnp.where(
-            state.step_count > 3000 + lives_lost * 1000,
+            (state.stage == 0) & (state.step_count > 3000 + lives_lost * 1000),
             1,
             state.stage
         )
 
-        ## Landing on TOP of the oil rig ends the water scene and advances
-        ## to the next stage (real-game level-end condition). Side contact is
-        ## handled separately as a lethal collision in _resolve_oil_rig_collision.
-        rig_over_deck = jnp.logical_and(
-            state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x,
-            state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH,
-        )
-        rig_on_top = jnp.logical_and(
-            state.player_y + self.consts.PLAYER_COLLISION_HEIGHT >= state.oil_rig_y,
-            state.player_y <= state.oil_rig_y + self.consts.OIL_RIG_TOP_LAND_MARGIN,
-        )
-        landed_on_rig = state.oil_rig_active & rig_over_deck & rig_on_top
+        ## A downward landing starts the completion flash in
+        ## _resolve_oil_rig_landing; hand off only when that flash finishes.
         new_stage = jnp.where(
-            jnp.logical_and(new_stage == 1, landed_on_rig),
+            (state.stage == 1) & (state.stage_transition_timer == 1),
             2,
             new_stage
         )
@@ -1933,7 +1944,7 @@ class JaxJamesBond(
             return jnp.where(switch, jnp.array(park, dtype=v.dtype), v)
 
         ## Remember when the water scene (stage 1) begins, so the oil rig
-        ## can be time-gated to appear only 1000+ steps into it.
+        ## retains the team's OIL_RIG_MIN_STAGE1_STEPS eligibility delay.
         entering_stage1 = jnp.logical_and(switch, new_stage == 1)
         stage1_start_step = jnp.where(
             entering_stage1, state.step_count, state.stage1_start_step
@@ -1952,6 +1963,24 @@ class JaxJamesBond(
             stage=new_stage,
             stage1_start_step=stage1_start_step,
             oil_rig_done=oil_rig_done_reset,
+            stage_transition_timer=clear(state.stage_transition_timer, 0),
+            oil_rig_active=clear(state.oil_rig_active, False),
+            oil_rig_visible=clear(state.oil_rig_visible, False),
+            oil_rig_seq=clear(state.oil_rig_seq, 0),
+            oil_rig_landing_timer=clear(state.oil_rig_landing_timer, 0),
+            oil_rig_obstacles_remaining=clear(state.oil_rig_obstacles_remaining, 0),
+            oil_rig_x=clear(state.oil_rig_x, -1),
+            oil_rig_y=clear(state.oil_rig_y, -1),
+            sky_flash_timer=clear(state.sky_flash_timer, 0),
+            diamond_shot=clear(state.diamond_shot, False),
+            player_bullet_active=clear(state.player_bullet_active, False),
+            player_bullet_x=clear(state.player_bullet_x, -1),
+            player_bullet_y=clear(state.player_bullet_y, -1),
+            player_bullet_step=clear(state.player_bullet_step, -1),
+            player_wbullet_active=clear(state.player_wbullet_active, False),
+            player_wbullet_x=clear(state.player_wbullet_x, -1),
+            player_wbullet_y=clear(state.player_wbullet_y, -1),
+            player_wbullet_step=clear(state.player_wbullet_step, -1),
             ## Land objects vanish at the shoreline
             helicopter_active=clear(state.helicopter_active, False),
             helicopter_melee_step=clear(state.helicopter_melee_step, 0),
@@ -1993,7 +2022,7 @@ class JaxJamesBond(
         )
         next_diamond_y = state.diamond_y
         diamond_on_screen = next_diamond_x >= (self.consts.GAME_AREA_MIN_X - self.consts.DIAMOND_WIDTH)
-        next_diamond_active = state.diamond_active & diamond_on_screen
+        next_diamond_active = state.diamond_active & diamond_on_screen & (state.stage < 2)
 
         # Scuba (Scroll left)
         ## Measured in ALE: the diver swims left 1px every 4th frame (0.25
@@ -2057,57 +2086,48 @@ class JaxJamesBond(
             splash_age < self.consts.SPLASH_LIFETIME_FRAMES
         )
 
-        # Oil rig: stationary. Active purely as a frame window -- it is
-        ## glimpsed in the sky flash for a few frames, then gone. Computed
-        ## directly from step_count so spawn/despawn can't miss each other.
-        next_oil_rig_y = state.oil_rig_y
-        ## Oil rig is triggered by SHOOTING THE DIAMOND (not a frame timer).
-        ## diamond_shot (set last frame in the diamond collision) starts the
-        ## sequence: appear on the RIGHT with a flash, disappear, then reappear
-        ## on the LEFT near the player. Only (re)start when idle (seq == 0).
+        ## The rig is fixed in world space, like the seabed. A diamond shot
+        ## reveals it briefly; after that only its drawing is hidden. The
+        ## landing target continues scrolling until it leaves the screen.
+        ## The 4000-step gate enables future diamond hits; reaching the gate
+        ## alone never spawns a rig or reuses an earlier diamond hit.
         in_water = state.stage == 1
         steps_into_stage1 = state.step_count - state.stage1_start_step
         past_delay = steps_into_stage1 >= self.consts.OIL_RIG_MIN_STAGE1_STEPS
         diamond_shot_any = jnp.any(state.diamond_shot)
-        start_seq = jnp.logical_and(
-            jnp.logical_and(
-                jnp.logical_and(diamond_shot_any, in_water),
-                jnp.logical_and(past_delay, jnp.logical_not(state.oil_rig_done)),
-            ),
-            state.oil_rig_seq == 0,
+        start_seq = (
+            diamond_shot_any & in_water & past_delay & ~state.oil_rig_active
+        )
+        ## Match _render_water's step_count // 4 offset exactly: one pixel
+        ## left every fourth live frame, whether visible or hidden. The
+        ## 60-frame reveal timer must never set the rig's horizontal speed.
+        scroll_tick = state.step_count % 4 == 0
+        scrolled_rig_x = state.oil_rig_x - scroll_tick.astype(jnp.int32)
+        ## A missed attempt ends only after the entire rig passes the left
+        ## playfield edge; there is no separate hidden-position timeout.
+        rig_on_screen = scrolled_rig_x + self.consts.OIL_RIG_WIDTH > self.consts.GAME_AREA_MIN_X
+        next_oil_rig_active = in_water & (start_seq | (state.oil_rig_active & rig_on_screen))
+        next_oil_rig_x = jnp.where(
+            next_oil_rig_active,
+            jnp.where(start_seq, self.consts.OIL_RIG_RIGHT_X, scrolled_rig_x),
+            -1,
         )
         oil_rig_seq = jnp.where(
             start_seq,
             jnp.array(self.consts.OIL_RIG_SEQ_TOTAL, dtype=jnp.int32),
             jnp.maximum(state.oil_rig_seq - 1, 0),
         )
-        oil_rig_seq = jnp.where(state.death_timer > 0, jnp.array(0, dtype=jnp.int32), oil_rig_seq)
-        oil_rig_done = jnp.logical_or(state.oil_rig_done, start_seq)
-        ## The rig is VISIBLE the whole time and glides slowly from the RIGHT
-        ## edge to the LEFT over the full sequence -- one continuous motion,
-        ## no flash-only glimpses, no jump. The player lands on it anywhere
-        ## along the glide (collision reads oil_rig_x, which follows it).
-        next_oil_rig_active = oil_rig_seq > 0
-        next_oil_rig_visible = next_oil_rig_active
-        ## Progress 0 (seq == TOTAL, just appeared on the right) .. 1 (seq -> 0,
-        ## arrived on the left). Glide x from RIGHT_X down to LEFT_X.
-        span = jnp.maximum(self.consts.OIL_RIG_SEQ_TOTAL, 1)
-        progress = (self.consts.OIL_RIG_SEQ_TOTAL - oil_rig_seq).astype(jnp.int32)
-        glide_x = (self.consts.OIL_RIG_RIGHT_X
-                   - ((self.consts.OIL_RIG_RIGHT_X - self.consts.OIL_RIG_LEFT_X) * progress) // span)
-        next_oil_rig_x = jnp.where(
-            next_oil_rig_active,
-            glide_x.astype(jnp.int32),
-            state.oil_rig_x,
-        )
+        oil_rig_seq = jnp.where(next_oil_rig_active, oil_rig_seq, 0)
+        next_oil_rig_visible = next_oil_rig_active & (oil_rig_seq > 0)
+        ## A missed pass needs a fresh diamond hit, with no obstacle-count
+        ## delay. Hits during an active pass cannot teleport or restart it.
+        oil_rig_done = next_oil_rig_active
 
         # Second water scene roster (stage 2)
         in_water_b = state.stage == 2
-        scroll_tick = state.step_count % 4 == 0
         ## Rocket, measured cycle: floats submerged for a few frames, then
         ## climbs straight up 1px/frame and bursts with its tip at the
-        ## measured explosion row -- leaving the red debris bars and a
-        ## short full-sky flash.
+        ## measured explosion row. Only the flash remains; no falling bomb.
         rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
         rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
         next_rocket_x = jnp.where(
@@ -2120,12 +2140,13 @@ class JaxJamesBond(
             state.rocket_y - 1,
             state.rocket_y
         )
-        rocket_explodes = state.rocket_active & (
+        rocket_explodes = in_water_b & state.rocket_active & (
             next_rocket_y <= self.consts.ROCKET_EXPLODE_Y
         )
         next_rocket_active = state.rocket_active & (~rocket_explodes) & (
             next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
         )
+        sky_flash_timer = jnp.where(rocket_explodes, self.consts.SKY_FLASH_FRAMES, state.sky_flash_timer)
         ## Submarine (longplay): enters from the LEFT and cruises right,
         ## 2px every 3 frames
         sub_dx = jnp.where(state.step_count % 3 != 0, 1, 0)
@@ -2180,38 +2201,7 @@ class JaxJamesBond(
         next_wb_heli_active = state.wb_heli_active & (
             next_wb_heli_x < self.consts.OBJECT_EXIT_X
         )
-        ## Rocket debris: the two red bars drift with the world and fall
-        ## 1px/frame back to the waterline (the clock is held while
-        ## falling), float there briefly as the sparkle, then go.
-        debris_age = jnp.where(state.wb_flyer_active, state.wb_flyer_timer + 1, 0)
-        next_wb_flyer_x = jnp.where(
-            state.wb_flyer_active & scroll_tick,
-            state.wb_flyer_x - 1,
-            state.wb_flyer_x
-        )
-        debris_falling = state.wb_flyer_y < self.consts.DEBRIS_REST_Y
-        next_wb_flyer_y = jnp.where(
-            state.wb_flyer_active & debris_falling,
-            state.wb_flyer_y + 1,
-            state.wb_flyer_y
-        )
-        debris_age = jnp.where(debris_falling, 0, debris_age)
-        next_wb_flyer_active = state.wb_flyer_active & (
-            debris_age < self.consts.DEBRIS_REST_FRAMES
-        )
-        ## The burst hands over: rocket out, debris in centred on the burst column
-        next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
-        next_wb_flyer_x = jnp.where(
-            rocket_explodes,
-            next_rocket_x + (self.consts.ROCKET_WIDTH - self.consts.WB_FLYER_WIDTH) // 2,
-            next_wb_flyer_x,
-        )
-        next_wb_flyer_y = jnp.where(
-            rocket_explodes,
-            jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
-            next_wb_flyer_y,
-        )
-        debris_age = jnp.where(rocket_explodes, 0, debris_age)
+        ## Rocket bursts only flash; they never spawn a falling object.
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -2335,10 +2325,6 @@ class JaxJamesBond(
             next_wb_heli_x,
         )
 
-        ## The debris has no spawner of its own: it is born where the
-        ## rocket bursts (handled above with the rocket lifecycle).
-        wb_flyer_timer = debris_age
-
         ## Scuba diver: water only, one at a time, entering from the right
         ## edge with a breather between divers.
         scuba_respawn_timer = jnp.where(
@@ -2390,13 +2376,11 @@ class JaxJamesBond(
             jnp.where(on_land, 57, 62),
             next_diamond_y
         )
-        # Oil rig
-        # Position the rig at its fixed spot whenever the window (set above)
-        ## has it active. The window alone owns active/inactive now.
+        ## The rig stays at the waterline throughout its visible and hidden pass.
         next_oil_rig_y = jnp.where(
             next_oil_rig_active,
             self.consts.OIL_RIG_Y,
-            next_oil_rig_y
+            -1,
         )
         # Enemies
         ## Helicopter
@@ -2442,17 +2426,35 @@ class JaxJamesBond(
             next_pit_y
         )
 
+        ## Clear the existing roster when the rig arrives, as well as
+        ## suppressing new spawns during its visible and hidden windows.
+        next_helicopter_active = next_helicopter_active & ~start_seq
+        next_satellite_active = next_satellite_active & ~start_seq
+        next_scuba_active = next_scuba_active & ~start_seq
+        next_diamond_active = next_diamond_active & ~start_seq
+        next_splash_active = next_splash_active & ~start_seq
+        next_helicopter_melee_step = jnp.where(start_seq, 0, next_helicopter_melee_step)
+
         return state.replace(
             diamond_x=next_diamond_x,
+            ## Reaching burst height means the player missed the rocket.
+            ## Charge one life on that event, then use the usual death freeze
+            ## and cooldown so neither the flash nor a simultaneous hit can
+            ## charge another life. Shooting it earlier prevents the burst.
+            lives=jnp.maximum(state.lives - rocket_explodes.astype(jnp.int32), 0),
+            hit_cooldown=jnp.where(rocket_explodes, self.consts.HIT_COOLDOWN_STEPS, state.hit_cooldown),
+            death_timer=jnp.where(rocket_explodes, self.consts.DEATH_ANIMATION_FRAMES, state.death_timer),
             diamond_y=next_diamond_y,
             diamond_active=next_diamond_active,
             helicopter_x=next_helicopter_x,
             helicopter_y=next_helicopter_y,
             helicopter_active=next_helicopter_active,
             helicopter_melee_step=next_helicopter_melee_step,
+            helicopter_bomb_active=state.helicopter_bomb_active & ~start_seq,
             satellite_x=next_satellite_x,
             satellite_y=next_satellite_y,
             satellite_active=next_satellite_active,
+            satellite_laser_active=state.satellite_laser_active & ~start_seq,
             satellite_respawn_timer=satellite_respawn_timer,
             spawn_diamond_next=next_spawn_diamond_next,
             pit_x=next_pit_x,
@@ -2474,6 +2476,8 @@ class JaxJamesBond(
             oil_rig_active=next_oil_rig_active,
             oil_rig_visible=next_oil_rig_visible,
             oil_rig_done=oil_rig_done,
+            oil_rig_landing_timer=jnp.zeros_like(state.oil_rig_landing_timer),
+            oil_rig_obstacles_remaining=jnp.zeros_like(state.oil_rig_obstacles_remaining),
             oil_rig_seq=oil_rig_seq,
             stage1_start_step=state.stage1_start_step,
             rocket_x=next_rocket_x,
@@ -2481,16 +2485,18 @@ class JaxJamesBond(
             rocket_active=next_rocket_active,
             rocket_age=rocket_age,
             rocket_timer=rocket_timer,
+            sky_flash_timer=sky_flash_timer,
             submarine_x=next_submarine_x,
             submarine_active=next_submarine_active,
             submarine_timer=submarine_timer,
             wb_heli_x=next_wb_heli_x,
             wb_heli_active=next_wb_heli_active,
             wb_heli_timer=wb_heli_timer,
-            wb_flyer_x=next_wb_flyer_x,
-            wb_flyer_y=next_wb_flyer_y.astype(jnp.int32),
-            wb_flyer_active=next_wb_flyer_active,
-            wb_flyer_timer=wb_flyer_timer,
+            ## Keep the retired observation slot empty, including loaded saves.
+            wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
+            wb_flyer_y=jnp.array(-1, dtype=jnp.int32),
+            wb_flyer_active=jnp.array(False, dtype=jnp.bool_),
+            wb_flyer_timer=jnp.array(0, dtype=jnp.int32),
             sub_torp_x=next_torp_x,
             sub_torp_y=next_torp_y,
             sub_torp_active=next_torp_active,
@@ -2742,7 +2748,6 @@ class JaxJamesBond(
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_splash_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
-        state = self._resolve_debris_contacts(state)
         state = self._resolve_oil_rig_collision(state)
         return state
 
@@ -2788,14 +2793,12 @@ class JaxJamesBond(
         )
 
     def _resolve_water_shots(self, state: JamesBondState) -> JamesBondState:
-        """Water B: the player's rounds hit the rocket, its debris and the
-        submarine.
+        """Water B: the player's rounds hit the rocket and submarine.
 
         Read off the longplay: the anti-air shot destroys a climbing
         rocket and the depth charge a submerged or surfacing one (+200,
         6500 -> 6700 the moment the shot touched it); the depth charge
-        sinks the submarine for 200; the anti-air shot pops the falling
-        debris for 100. The used round is consumed on impact.
+        sinks the submarine for 200. The used round is consumed on impact.
         """
 
         in_water_b = state.stage == 2
@@ -2820,19 +2823,6 @@ class JaxJamesBond(
             rocket_hits(state.player_wbullet_x, state.player_wbullet_y, state.player_wbullet_active),
         )
         rocket_hit = air_hit | water_hit
-        ## The anti-air shot also pops the falling / floating debris
-        debris_hit = jnp.logical_and(
-            jnp.logical_and(in_water_b, state.player_bullet_active),
-            jnp.logical_and(
-                state.wb_flyer_active,
-                _aabb_overlap(
-                    state.player_bullet_x, state.player_bullet_y,
-                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
-                    state.wb_flyer_x, state.wb_flyer_y,
-                    self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
-                ),
-            ),
-        )
         sub_hit = jnp.logical_and(
             jnp.logical_and(in_water_b, state.player_wbullet_active),
             jnp.logical_and(
@@ -2845,11 +2835,10 @@ class JaxJamesBond(
                 ),
             ),
         )
-        air_used = air_hit | debris_hit
+        air_used = air_hit
         water_used = water_hit | sub_hit
         gained = (
             rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET
-            + debris_hit.astype(jnp.int32) * self.consts.SCORE_DEBRIS_SHOT
             + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
         )
 
@@ -2861,7 +2850,6 @@ class JaxJamesBond(
         return state.replace(
             score=(state.score + gained).astype(jnp.int32),
             rocket_active=state.rocket_active & (~rocket_hit),
-            wb_flyer_active=state.wb_flyer_active & (~debris_hit),
             submarine_active=state.submarine_active & (~sub_hit),
             player_bullet_active=air_keep,
             player_bullet_step=park(air_keep, state.player_bullet_step),
@@ -2873,43 +2861,41 @@ class JaxJamesBond(
             player_wbullet_y=park(water_keep, state.player_wbullet_y),
         )
 
-    def _resolve_debris_contacts(self, state: JamesBondState) -> JamesBondState:
-        """Water B: the falling / floating red debris costs a life."""
-
-        debris_hit = jnp.logical_and(
-            jnp.logical_and(state.stage == 2, state.wb_flyer_active),
-            _aabb_overlap(
-                state.player_x, state.player_y,
-                self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
-                state.wb_flyer_x, state.wb_flyer_y,
-                self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
-            ),
+    def _resolve_oil_rig_landing(
+        self, previous_state: JamesBondState, state: JamesBondState
+    ) -> JamesBondState:
+        ## Only the player's downward crossing of the top counts as landing.
+        ## Merely rising beside the rig or having it scroll under the boat
+        ## must not complete the scene. Never move the player onto the rig.
+        ## Compare the player's feet before/after movement against the rig's
+        ## current scrolled position, not where it was last drawn. This also
+        ## catches a fast descent that crosses the top between two frames.
+        over_deck = (
+            (state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x)
+            & (state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH)
         )
-        can_take_damage = state.hit_cooldown <= 0
-        took_damage = jnp.logical_and(debris_hit, can_take_damage)
-
+        crossing_top = (
+            (previous_state.player_y + self.consts.PLAYER_COLLISION_HEIGHT <= state.oil_rig_y)
+            & (state.player_y + self.consts.PLAYER_COLLISION_HEIGHT >= state.oil_rig_y)
+            & (state.player_y > previous_state.player_y)
+            & (state.player_falling | state.player_fast_falling)
+        )
+        landed = (
+            (state.stage == 1) & state.oil_rig_active & over_deck & crossing_top
+            & (state.death_timer == 0) & (state.stage_transition_timer == 0)
+        )
         return state.replace(
-            lives=jnp.maximum(
-                0, state.lives - took_damage.astype(jnp.int32)
-            ).astype(jnp.int32),
-            hit_cooldown=jnp.where(
-                took_damage,
-                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
-                state.hit_cooldown,
-            ),
-            death_timer=jnp.where(
-                took_damage,
-                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
-                state.death_timer,
+            oil_rig_visible=state.oil_rig_visible | landed,
+            stage_transition_timer=jnp.where(
+                landed, self.consts.STAGE_TRANSITION_FRAMES, state.stage_transition_timer
             ),
         )
 
     def _resolve_oil_rig_collision(self, state: JamesBondState) -> JamesBondState:
-        """Side contact with the oil rig is lethal; landing on top is handled
-        in _update_stage (it advances the scene, so it must NOT also kill).
-        """
-        overlap = jnp.logical_and(
-            state.oil_rig_active,
+        ## Successful top landings already start the completion freeze before
+        ## this collision pass. Any remaining body overlap is a crash.
+        side_hit = jnp.logical_and(
+            (state.stage == 1) & state.oil_rig_active,
             _aabb_overlap(
                 state.player_x, state.player_y,
                 self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
@@ -2917,17 +2903,6 @@ class JaxJamesBond(
                 self.consts.OIL_RIG_WIDTH, self.consts.OIL_RIG_HEIGHT,
             ),
         )
-        on_top = jnp.logical_and(
-            jnp.logical_and(
-                state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x,
-                state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH,
-            ),
-            jnp.logical_and(
-                state.player_y + self.consts.PLAYER_COLLISION_HEIGHT >= state.oil_rig_y,
-                state.player_y <= state.oil_rig_y + self.consts.OIL_RIG_TOP_LAND_MARGIN,
-            ),
-        )
-        side_hit = jnp.logical_and(overlap, jnp.logical_not(on_top))
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(side_hit, can_take_damage)
         return state.replace(
@@ -2949,6 +2924,9 @@ class JaxJamesBond(
             oil_rig_seq=jnp.where(
                 side_hit, jnp.array(0, dtype=jnp.int32), state.oil_rig_seq
             ),
+            oil_rig_landing_timer=jnp.where(side_hit, 0, state.oil_rig_landing_timer),
+            oil_rig_active=state.oil_rig_active & ~side_hit,
+            oil_rig_visible=state.oil_rig_visible & ~side_hit,
         )
 
     def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -2992,9 +2970,6 @@ class JaxJamesBond(
             touch(state.sub_torp_x, state.sub_torp_y - 3, ## Hits higher than the sprite size
                   self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT),
         )
-        ## The rocket debris (falling or floating) is handled in
-        ## _resolve_debris_contacts.
-
         any_hit = rocket_hit | submarine_hit | heli_hit | shot_hit
         can_take_damage = state.hit_cooldown <= 0
         took_damage = jnp.logical_and(any_hit, can_take_damage)
@@ -3163,15 +3138,18 @@ class JaxJamesBond(
         +50 in every scene (verified in ALE on land and over the water).
         """
 
+        ## Both animation poses have their solid gem at x+1..5, y+3..8.
+        ## The sprite's first rows contain sparkles; anchoring the hitbox
+        ## there excluded the bottom tip and let visible hits pass through.
         overlap = _aabb_overlap(
             state.player_bullet_x,
             state.player_bullet_y,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
             state.diamond_x + 1, ## For better hit boxes
-            state.diamond_y,
+            state.diamond_y + 3,
             self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT + 1, ## For better hit boxes
+            self.consts.DIAMOND_COLLISION_HEIGHT,
         )
 
         collected = jnp.logical_and(
@@ -3190,6 +3168,10 @@ class JaxJamesBond(
 
         return state.replace(
             diamond_shot=collected,
+            sky_flash_timer=jnp.where(
+                collected & (state.stage == 1), self.consts.DIAMOND_FLASH_FRAMES,
+                state.sky_flash_timer,
+            ),
             diamond_active = jnp.logical_and( ## TODO: change diamond x and y? 
                 state.diamond_active, ~collected
             ),
@@ -3313,6 +3295,8 @@ class JaxJamesBond(
         )
     
     def _resolve_bullet_diamond_collisions(self, state: JamesBondState) -> JamesBondState:
+        ## Consume last frame's hit even if it already consumed the bullet.
+        state = state.replace(diamond_shot=jnp.array(False, dtype=jnp.bool_))
         return lax.cond(
             jnp.logical_and(state.player_bullet_active, state.diamond_active),
             self.collectible_collisions_logic,
@@ -3640,47 +3624,27 @@ class JamesBondRenderer(JAXGameRenderer):
         return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
 
     def _render_oil_rig_flash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Full-screen sky flash that stays lit the WHOLE time the rig is on
-        screen (the whole right-to-left glide), so the flash travels with the
-        rig rather than blinking only at the ends."""
-        rig_flash = jnp.logical_and(state.stage == 1, state.oil_rig_visible)
+        """Timed medium-gray flashes for hits, rocket bursts and completion."""
+        rig_flash = (state.stage >= 1) & (
+            (state.sky_flash_timer > 0) | (state.stage_transition_timer > 0)
+        )
         def _rig_flash(r):
             pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
             size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
-            return self.jr.draw_rects(r, pos, size, 13)  # id 13 = white (236,236,236)
+            return self.jr.draw_rects(r, pos, size, self.COLOR_TO_ID[(142, 142, 142)])
         return jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
 
     def _render_oil_rig(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the oil rig sprite while it is active (glimpsed in the flash)."""
+        """Draw the two-second reveal or landing confirmation, only in water A."""
         def draw_fn(r):
             return self.jr.render_at_clipped(
                 r, state.oil_rig_x, state.oil_rig_y, self.SHAPE_MASKS['oil_rig'][0]
             )
-        return jax.lax.cond(state.oil_rig_visible, draw_fn, lambda r: r, raster)
+        return jax.lax.cond((state.stage == 1) & state.oil_rig_visible, draw_fn, lambda r: r, raster)
 
     def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the second water scene roster."""
 
-        def one(raster, active, x, y, mask_name):
-            return jax.lax.cond(
-                active,
-                lambda r: self.jr.render_at_clipped(r, x, y, self.SHAPE_MASKS[mask_name]),
-                lambda r: r,
-                raster,
-            )
-
-        ## The rocket burst flashes the whole sky gray for a frame or two.
-        ## Keyed to the debris height: the bars fall 1px/frame from the
-        ## burst row, and their clock is held while they fall.
-        raster = one(
-            raster,
-            jnp.logical_and(
-                state.wb_flyer_active,
-                state.wb_flyer_y < self.consts.WB_FLYER_Y + self.consts.SKY_FLASH_FRAMES,
-            ),
-            jnp.array(4, dtype=jnp.int32), jnp.array(29, dtype=jnp.int32), 'sky_flash',
-        )
-        
         index_switch = (state.step_count // 8) % 2
 
         def render_with_switch(raster, active, x, y, mask):
@@ -3701,7 +3665,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = render_with_switch(
             raster,
-            state.rocket_active,
+            (state.stage == 2) & (state.rocket_active | (state.sky_flash_timer > 0)),
             state.rocket_x,
             state.rocket_y,
             self.SHAPE_MASKS["rocket"][index_switch],
@@ -3722,22 +3686,6 @@ class JamesBondRenderer(JAXGameRenderer):
             state.sub_torp_y,
             self.SHAPE_MASKS["sub_shot"][index_switch],
         )
-        ## Rocket debris: the two red bars while falling, the red / pink
-        ## sparkle (two dot patterns swapping every few frames) once it
-        ## floats at the waterline
-        debris_resting = state.wb_flyer_y >= self.consts.DEBRIS_REST_Y
-        splash_pose = (state.step_count // self.consts.DEBRIS_SPLASH_FLIP_FRAMES) % 2
-        raster = one(raster, state.wb_flyer_active & (~debris_resting),
-                     state.wb_flyer_x, state.wb_flyer_y, 'rocket_ball')
-
-        raster = render_with_switch(
-            raster,
-            jnp.logical_and(state.wb_flyer_active, debris_resting),
-            state.wb_flyer_x - 1,
-            self.consts.DEBRIS_SPLASH_Y,
-            self.SHAPE_MASKS["debris_splash"][splash_pose],
-        )
-
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
@@ -3807,7 +3755,7 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS['diamond'][sprite_idx],
         )
 
-        return jax.lax.cond(state.diamond_active, draw_fn, lambda r: r, raster)
+        return jax.lax.cond((state.stage < 2) & state.diamond_active, draw_fn, lambda r: r, raster)
 
     def _render_pit(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the fire pit."""
