@@ -323,10 +323,10 @@ class JamesBondConstants(struct.PyTreeNode):
     OIL_RIG_WIDTH: int = struct.field(pytree_node=False, default=16)
     OIL_RIG_HEIGHT: int = struct.field(pytree_node=False, default=22)
     OIL_RIG_SEQ_TOTAL: int = struct.field(pytree_node=False, default=60)      ## visible for two seconds at 30 fps; scroll continues while hidden
-    OIL_RIG_RIGHT_X: int = struct.field(pytree_node=False, default=120)       ## right appear column
+    OIL_RIG_RIGHT_X: int = struct.field(pytree_node=False, default=144)
     OIL_RIG_Y: int = struct.field(pytree_node=False, default=100)             ## top-left y: deck at waterline, legs in water
     OIL_RIG_MIN_STAGE1_STEPS: int = struct.field(pytree_node=False, default=4000) ## rig can't appear until 4000+ steps into the water scene
-    DIAMOND_FLASH_FRAMES: int = struct.field(pytree_node=False, default=6) ## 0.2 seconds at 30 fps
+    DIAMOND_FLASH_FRAMES: int = struct.field(pytree_node=False, default=60)
     STAGE_TRANSITION_FRAMES: int = struct.field(pytree_node=False, default=30) ## one-second completion flash before water B
 
     ## Second water scene (after the dock bonus): darker water and a fresh
@@ -602,7 +602,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2094,9 +2094,8 @@ class JaxJamesBond(
         in_water = state.stage == 1
         steps_into_stage1 = state.step_count - state.stage1_start_step
         past_delay = steps_into_stage1 >= self.consts.OIL_RIG_MIN_STAGE1_STEPS
-        diamond_shot_any = jnp.any(state.diamond_shot)
         start_seq = (
-            diamond_shot_any & in_water & past_delay & ~state.oil_rig_active
+            in_water & past_delay & ~state.oil_rig_active
         )
         ## Match _render_water's step_count // 4 offset exactly: one pixel
         ## left every fourth live frame, whether visible or hidden. The
@@ -2106,7 +2105,7 @@ class JaxJamesBond(
         ## A missed attempt ends only after the entire rig passes the left
         ## playfield edge; there is no separate hidden-position timeout.
         rig_on_screen = scrolled_rig_x + self.consts.OIL_RIG_WIDTH > self.consts.GAME_AREA_MIN_X
-        next_oil_rig_active = in_water & (start_seq | (state.oil_rig_active & rig_on_screen))
+        next_oil_rig_active = in_water & (start_seq | (state.oil_rig_active & rig_on_screen)) & past_delay
         next_oil_rig_x = jnp.where(
             next_oil_rig_active,
             jnp.where(start_seq, self.consts.OIL_RIG_RIGHT_X, scrolled_rig_x),
@@ -2118,7 +2117,7 @@ class JaxJamesBond(
             jnp.maximum(state.oil_rig_seq - 1, 0),
         )
         oil_rig_seq = jnp.where(next_oil_rig_active, oil_rig_seq, 0)
-        next_oil_rig_visible = next_oil_rig_active & (oil_rig_seq > 0)
+        next_oil_rig_visible = next_oil_rig_active & (state.sky_flash_timer > 0)
         ## A missed pass needs a fresh diamond hit, with no obstacle-count
         ## delay. Hits during an active pass cannot teleport or restart it.
         oil_rig_done = next_oil_rig_active
@@ -2268,7 +2267,7 @@ class JaxJamesBond(
         # also patrols the first water scene, dropping the same bombs
         # (measured: enters right, ~0.58 px/f slowing mid-screen, ~2 bombs
         # per crossing). Only the second water scene retires it.
-        spawn_diamond = row_57_empty & state.spawn_diamond_next & (~in_water_b) & (~next_oil_rig_active)
+        spawn_diamond = row_57_empty & state.spawn_diamond_next & (~in_water_b)
         ## The helicopter spawning will be delayed by 75 frames from initial state
         helicopter_delay_passed = state.step_count >= 75
         spawn_helicopter = row_57_empty & (~state.spawn_diamond_next) & (~in_water_b) & (~state.oil_rig_active) & (helicopter_delay_passed)
@@ -2431,7 +2430,6 @@ class JaxJamesBond(
         next_helicopter_active = next_helicopter_active & ~start_seq
         next_satellite_active = next_satellite_active & ~start_seq
         next_scuba_active = next_scuba_active & ~start_seq
-        next_diamond_active = next_diamond_active & ~start_seq
         next_splash_active = next_splash_active & ~start_seq
         next_helicopter_melee_step = jnp.where(start_seq, 0, next_helicopter_melee_step)
 
@@ -2909,6 +2907,11 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
+            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+                took_damage,
+                state.step_count,
+                state.stage1_start_step,
+            ),
             hit_cooldown=jnp.where(
                 took_damage,
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
@@ -3022,6 +3025,11 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - splash_hit.astype(jnp.int32)
             ).astype(jnp.int32),
+            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+                splash_hit,
+                state.step_count,
+                state.stage1_start_step,
+            ),
             hit_cooldown=jnp.where(
                 splash_hit,
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
@@ -3078,6 +3086,11 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
+            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+                took_damage,
+                state.step_count,
+                state.stage1_start_step,
+            ),
             hit_cooldown=jnp.where(
                 took_damage,
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
@@ -3161,6 +3174,12 @@ class JaxJamesBond(
             state.player_bullet_active, ~collected
         )
 
+        next_sky_flash_timer = jnp.where(
+            collected & (state.stage == 1),
+            self.consts.DIAMOND_FLASH_FRAMES,
+            state.sky_flash_timer,
+        )
+
         new_score = state.score + collected * self.consts.SCORE_DIAMOND
 
         def park(active, v):
@@ -3168,10 +3187,7 @@ class JaxJamesBond(
 
         return state.replace(
             diamond_shot=collected,
-            sky_flash_timer=jnp.where(
-                collected & (state.stage == 1), self.consts.DIAMOND_FLASH_FRAMES,
-                state.sky_flash_timer,
-            ),
+            sky_flash_timer=next_sky_flash_timer,
             diamond_active = jnp.logical_and( ## TODO: change diamond x and y? 
                 state.diamond_active, ~collected
             ),
@@ -3623,7 +3639,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         return jax.lax.cond(submerged, draw_fn, lambda r: r, raster)
 
-    def _render_oil_rig_flash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
+    def _render_oil_rig_flash(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray: ###########
         """Timed medium-gray flashes for hits, rocket bursts and completion."""
         rig_flash = (state.stage >= 1) & (
             (state.sky_flash_timer > 0) | (state.stage_transition_timer > 0)
@@ -3631,16 +3647,23 @@ class JamesBondRenderer(JAXGameRenderer):
         def _rig_flash(r):
             pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
             size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
-            return self.jr.draw_rects(r, pos, size, self.COLOR_TO_ID[(142, 142, 142)])
+            new_raster = jax.lax.cond(
+                state.step_count % 2,
+                lambda r: self.jr.draw_rects(r, pos, size, self.COLOR_TO_ID[(142, 142, 142)]),
+                lambda r: r,
+                raster,
+            )
+            return new_raster
+
         return jax.lax.cond(rig_flash, _rig_flash, lambda r: r, raster)
 
     def _render_oil_rig(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
-        """Draw the two-second reveal or landing confirmation, only in water A."""
+        """Draw the reveal or landing confirmation, only in water A."""
         def draw_fn(r):
             return self.jr.render_at_clipped(
                 r, state.oil_rig_x, state.oil_rig_y, self.SHAPE_MASKS['oil_rig'][0]
             )
-        return jax.lax.cond((state.stage == 1) & state.oil_rig_visible, draw_fn, lambda r: r, raster)
+        return jax.lax.cond(state.oil_rig_visible, draw_fn, lambda r: r, raster)
 
     def _render_waterb(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
         """Draw the second water scene roster."""
