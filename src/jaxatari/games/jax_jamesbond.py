@@ -349,6 +349,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
+    ROCKER_BALL_SPAWN_Y: int = struct.field(pytree_node=False, default=62) ## For the spawn condition of the rocket's red ball
     SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
@@ -602,7 +603,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2984,6 +2985,11 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
+            rocket_y=jnp.where(
+                took_damage,
+                self.consts.ROCKET_Y,
+                state.rocket_y,
+            ),
             hit_cooldown=jnp.where(
                 took_damage,
                 jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
@@ -3688,7 +3694,7 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = render_with_switch(
             raster,
-            (state.stage == 2) & (state.rocket_active | (state.sky_flash_timer > 0)),
+            state.rocket_active,
             state.rocket_x,
             state.rocket_y,
             self.SHAPE_MASKS["rocket"][index_switch],
@@ -3709,6 +3715,16 @@ class JamesBondRenderer(JAXGameRenderer):
             state.sub_torp_y,
             self.SHAPE_MASKS["sub_shot"][index_switch],
         )
+
+        rocket_ball_spawn = (state.rocket_y - 1 <= self.consts.ROCKET_EXPLODE_Y) & (state.death_timer > 0)
+        raster = render_with_switch(
+            raster, 
+            rocket_ball_spawn, 
+            state.rocket_x + 2, 
+            state.rocket_y, 
+            self.SHAPE_MASKS["rocket_ball"]
+        )
+        
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
