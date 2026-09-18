@@ -349,7 +349,6 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
-    ROCKER_BALL_SPAWN_Y: int = struct.field(pytree_node=False, default=62) ## For the spawn condition of the rocket's red ball
     SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
