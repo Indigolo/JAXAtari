@@ -2930,7 +2930,11 @@ class JaxJamesBond(
             oil_rig_landing_timer=jnp.where(side_hit, 0, state.oil_rig_landing_timer),
             oil_rig_active=state.oil_rig_active & ~side_hit,
             oil_rig_visible=state.oil_rig_visible & ~side_hit,
-            scuba_seen=False
+            scuba_seen=jnp.where(
+                took_damage,
+                False,
+                state.scuba_seen
+            ),
         )
 
     def _resolve_waterb_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -3025,8 +3029,6 @@ class JaxJamesBond(
             jnp.logical_and(x_touch, low_enough),
         )
 
-        can_take_damage = state.hit_cooldown <= 0
-
         return state.replace(
             lives=jnp.maximum(
                 0, state.lives - splash_hit.astype(jnp.int32)
@@ -3046,7 +3048,11 @@ class JaxJamesBond(
                 jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
                 state.death_timer,
             ),
-            scuba_seen=False
+            scuba_seen=jnp.where(
+                splash_hit,
+                False,
+                state.scuba_seen
+            ),
         )
 
     def _resolve_bullet_player_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -3108,7 +3114,11 @@ class JaxJamesBond(
                 jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
                 state.death_timer,
             ),
-            scuba_seen=False
+            scuba_seen=jnp.where(
+                took_damage,
+                False,
+                state.scuba_seen
+            ),
         )
 
     def _resolve_pit_player_collisions(self, state: JamesBondState) -> JamesBondState:
@@ -3215,41 +3225,70 @@ class JaxJamesBond(
         """
         diver_active = jnp.logical_and(state.scuba_active, ~state.scuba_radioactive)
 
-        box_x = jnp.where(state.scuba_radioactive, state.scuba_x - 4, state.scuba_x)
-        box_y = jnp.where(
-            state.scuba_radioactive,
-            jnp.array(self.consts.SPLASH_Y, dtype=jnp.int32),
-            state.scuba_y,
-        )
-        box_w = jnp.where(state.scuba_radioactive, self.consts.SPLASH_WIDTH, self.consts.SCUBA_WIDTH)
-        box_h = jnp.where(state.scuba_radioactive, self.consts.SPLASH_HEIGHT, self.consts.SCUBA_HEIGHT)
-        overlap = _aabb_overlap(
+        bullet_overlap = _aabb_overlap(
             state.player_wbullet_x,
             state.player_wbullet_y,
             self.consts.BULLET_WIDTH,
             self.consts.BULLET_HEIGHT,
-            box_x, box_y, box_w, box_h,
+            state.scuba_x,
+            state.scuba_y,
+            self.consts.SCUBA_WIDTH,
+            self.consts.SCUBA_HEIGHT
         )
 
-        hit = jnp.logical_and(
+        bullet_hit = jnp.logical_and(
             jnp.logical_and(diver_active, state.player_wbullet_active),
-            overlap,
+            bullet_overlap,
         )
 
         player_wbullet_active = jnp.logical_and(
-            state.player_wbullet_active, ~hit
+            state.player_wbullet_active, ~bullet_hit
         )
 
-        new_score = state.score + hit * self.consts.SCORE_SCUBA
+        new_score = state.score + bullet_hit * self.consts.SCORE_SCUBA
+
+        ## Scuba splash collision logic
+        x_touch = jnp.logical_and(
+            state.player_x >= state.scuba_x - 9,
+            state.player_x <= state.scuba_x + 19,
+        )
+        low_enough = state.player_y >= self.consts.SPLASH_SAFE_PLAYER_Y
+        splash_hit = jnp.logical_and(
+            state.scuba_radioactive,
+            jnp.logical_and(x_touch, low_enough),
+        )
 
         def park(active, v):
             return jnp.where(active, v, -1)
 
         return state.replace(
-            scuba_active = jnp.logical_and(
-                state.scuba_active, ~hit
+            lives=jnp.maximum(
+                0, state.lives - splash_hit.astype(jnp.int32)
+            ).astype(jnp.int32),
+            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+                splash_hit,
+                state.step_count,
+                state.stage1_start_step,
             ),
-            scuba_radioactive=jnp.logical_and(state.scuba_radioactive, ~hit),
+            hit_cooldown=jnp.where(
+                splash_hit,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            death_timer=jnp.where(
+                splash_hit,
+                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.death_timer,
+            ),
+            scuba_seen=jnp.where(
+                splash_hit,
+                False,
+                state.scuba_seen
+            ),
+            scuba_active = jnp.logical_and(
+                state.scuba_active, ~bullet_hit
+            ),
+            scuba_radioactive=jnp.logical_and(state.scuba_radioactive, ~bullet_hit),
             player_wbullet_active=player_wbullet_active,
             player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
             player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
@@ -3330,7 +3369,7 @@ class JaxJamesBond(
 
     def _resolve_wbullet_scuba_collisions(self, state: JamesBondState) -> JamesBondState:
         return lax.cond(
-            jnp.logical_and(state.player_wbullet_active, state.scuba_active),
+            state.scuba_active | state.scuba_radioactive,
             self.scuba_collisions_logic,
             lambda s: s,
             state
