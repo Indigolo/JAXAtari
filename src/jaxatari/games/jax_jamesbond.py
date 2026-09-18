@@ -603,7 +603,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -3652,7 +3652,7 @@ class JamesBondRenderer(JAXGameRenderer):
         )
         def _rig_flash(r):
             pos = jnp.array([[0, 29]], dtype=jnp.int32)   # sky band only, starts below the HUD
-            size = jnp.array([[self.consts.SCREEN_WIDTH, 91]], dtype=jnp.int32)  # rows 29..120
+            size = jnp.array([[self.consts.SCREEN_WIDTH, 92]], dtype=jnp.int32)  # rows 29..120
             new_raster = jax.lax.cond(
                 state.step_count % 2,
                 lambda r: self.jr.draw_rects(r, pos, size, self.COLOR_TO_ID[(142, 142, 142)]),
