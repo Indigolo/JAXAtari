@@ -495,7 +495,6 @@ class JamesBondState:
     scuba_x: chex.Array
     scuba_y: chex.Array
     scuba_active: chex.Array
-    scuba_age: chex.Array ## frames since he entered; he vanishes on a clock
     scuba_respawn_timer: chex.Array ## breather before the next diver enters
     scuba_radioactive: chex.Array ## the diver currently holds the radioactive state
     scuba_radioactive_age: chex.Array ## how long he has been glowing
@@ -677,7 +676,6 @@ class JaxJamesBond(
             scuba_x=jnp.array(-1, dtype=jnp.int32),
             scuba_y=jnp.array(-1, dtype=jnp.int32),
             scuba_active=jnp.array(False, dtype=jnp.bool_),
-            scuba_age=jnp.array(0, dtype=jnp.int32),
             scuba_respawn_timer=jnp.array(0, dtype=jnp.int32),
             scuba_radioactive=jnp.array(False, dtype=jnp.bool_),
             scuba_radioactive_age=jnp.array(0, dtype=jnp.int32),
@@ -1998,7 +1996,6 @@ class JaxJamesBond(
             satellite_lasers_dropped=clear(state.satellite_lasers_dropped, 0),
             ## Water objects vanish when the water ends
             scuba_active=clear(state.scuba_active, False),
-            scuba_age=clear(state.scuba_age, 0),
             scuba_radioactive=clear(state.scuba_radioactive, False),
             scuba_radioactive_age=clear(state.scuba_radioactive_age, 0),
             scuba_respawn_timer=clear(
@@ -2035,7 +2032,6 @@ class JaxJamesBond(
             state.scuba_x
         )
         next_scuba_y = state.scuba_y
-        scuba_age = jnp.where(state.scuba_active, state.scuba_age + 1, 0)
         ## An existing glow runs on its own clock. Once its fixed lifetime
         ## expires it may be activated again only by player proximity.
         scuba_rad_age = jnp.where(
@@ -2043,11 +2039,6 @@ class JaxJamesBond(
         )
         still_glowing = state.scuba_radioactive & (
             scuba_rad_age < self.consts.SCUBA_RADIOACTIVE_FRAMES
-        )
-        ## A radioactive diver remains until his glow has finished, even if
-        ## his ordinary on-screen lifetime expires first.
-        next_scuba_active = state.scuba_active & (
-            (scuba_age < self.consts.SCUBA_LIFETIME_FRAMES) | still_glowing
         )
         ## The diver becomes radioactive as soon as the boat is horizontally
         ## close enough. This is independent of every satellite projectile.
@@ -2064,12 +2055,12 @@ class JaxJamesBond(
         )
         scuba_in_range = (
             (state.stage == 1)
-            & next_scuba_active
+            & state.scuba_active
             & (scuba_horizontal_gap <= self.consts.SCUBA_RADIOACTIVE_RANGE)
         )
         newly_radioactive = scuba_in_range & (~state.scuba_radioactive)
         next_scuba_radioactive = (
-            (still_glowing | scuba_in_range) & next_scuba_active
+            (still_glowing | scuba_in_range) & state.scuba_active
         )
         scuba_rad_age = jnp.where(newly_radioactive, 0, scuba_rad_age)
 
@@ -2327,7 +2318,7 @@ class JaxJamesBond(
         ## Scuba diver: water only, one at a time, entering from the right
         ## edge with a breather between divers.
         scuba_respawn_timer = jnp.where(
-            next_scuba_active | on_land,
+            state.scuba_active | on_land,
             jnp.array(self.consts.SCUBA_RESPAWN_FRAMES, dtype=jnp.int32),
             jnp.maximum(state.scuba_respawn_timer - 1, 0),
         )
@@ -2335,8 +2326,8 @@ class JaxJamesBond(
             in_water,
             steps_into_stage1 >= 1500
         )
-        spawn_scuba = in_water & (~next_scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed) & (~next_oil_rig_active)
-        next_scuba_active = next_scuba_active | spawn_scuba
+        spawn_scuba = in_water & (~state.scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed) & (~next_oil_rig_active)
+        next_scuba_active = state.scuba_active | spawn_scuba
         next_scuba_x = jnp.where(
             spawn_scuba,
             jnp.array(self.consts.SCUBA_SPAWN_X, dtype=jnp.int32),
@@ -2347,7 +2338,6 @@ class JaxJamesBond(
             jnp.array(self.consts.SCUBA_SPAWN_Y, dtype=jnp.int32),
             next_scuba_y
         )
-        scuba_age = jnp.where(spawn_scuba, 0, scuba_age)
         ## Once the first diver has shown up, radioactivity belongs to the
         ## divers for the rest of the scene (team rule: only one thing is
         ## ever radioactive, and the satellite must not splash after the
@@ -2461,7 +2451,6 @@ class JaxJamesBond(
             scuba_x=next_scuba_x,
             scuba_y=next_scuba_y,
             scuba_active=next_scuba_active,
-            scuba_age=scuba_age,
             scuba_radioactive=next_scuba_radioactive,
             scuba_radioactive_age=scuba_rad_age,
             scuba_respawn_timer=scuba_respawn_timer,
