@@ -344,17 +344,19 @@ class JamesBondConstants(struct.PyTreeNode):
     ## disappears without dropping debris. One rocket every 256 frames.
     ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
     ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
-    ROCKET_Y: int = struct.field(pytree_node=False, default=138) ## rests low in the water; a diving boat can ram it
-    ROCKET_SPAWN_X: int = struct.field(pytree_node=False, default=85) ## appears mid-screen, not at the edge
+    ROCKET_Y: int = struct.field(pytree_node=False, default=142) ## rests low in the water; a diving boat can ram it
+    ROCKET_SPAWN_X: int = struct.field(pytree_node=False, default=66) ## appears at x = 66
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
+    ROCKET_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=300) ## First rocket pass is delayed 300 frames after entering stage 2
     SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
     SUBMARINE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=260)
-    ## The pink ball (fields still called wb_heli_*): enters at the LEFT
+    SUBMARINE_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=320) ## First submarine pass is delayed 320 frames after entering stage 2
+    ## The pink ball (fields still called pinkball_*): enters at the LEFT
     ## edge at row 57 and crosses to the right at 1.75 px/f (7 px every 4
     ## frames, read off the longplay at 60 fps). The anti-air shot pops
     ## it for 500; the pop that reaches WB_BALL_HITS_TO_EXIT pays the
@@ -363,12 +365,13 @@ class JamesBondConstants(struct.PyTreeNode):
     ## 7600->8100; the team's count was two, so this is one constant to
     ## flip). In the real game a 59-frame freeze with a flickering sky
     ## follows and the daylight scene starts; that scene is out of scope.
-    WB_HELI_Y: int = struct.field(pytree_node=False, default=57)
-    WB_HELI_WIDTH: int = struct.field(pytree_node=False, default=9)
-    WB_HELI_HEIGHT: int = struct.field(pytree_node=False, default=11)
-    WB_HELI_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
+    PINKBALL_Y: int = struct.field(pytree_node=False, default=57)
+    PINKBALL_WIDTH: int = struct.field(pytree_node=False, default=9)
+    PINKBALL_HEIGHT: int = struct.field(pytree_node=False, default=11)
+    PINKBALL_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=200)
     SCORE_BALL: int = struct.field(pytree_node=False, default=500)
     WB_BALL_HITS_TO_EXIT: int = struct.field(pytree_node=False, default=3)
+    PINKBALL_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=200) ## First pinkball pass is delayed 200 frames after entering stage 2
     ## Legacy dimensions for the retired debris observation slot.
     WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
     WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
@@ -523,9 +526,9 @@ class JamesBondState:
     submarine_x: chex.Array
     submarine_active: chex.Array
     submarine_timer: chex.Array
-    wb_heli_x: chex.Array
-    wb_heli_active: chex.Array
-    wb_heli_timer: chex.Array
+    pinkball_x: chex.Array
+    pinkball_active: chex.Array
+    pinkball_timer: chex.Array
     wb_ball_hits: chex.Array ## pink balls shot this scene (water B exit counter)
     ## Retired debris slot stays inactive; retain the observation layout.
     wb_flyer_x: chex.Array
@@ -601,7 +604,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -698,13 +701,13 @@ class JaxJamesBond(
             rocket_y=jnp.array(-1, dtype=jnp.int32),
             rocket_active=jnp.array(False, dtype=jnp.bool_),
             rocket_age=jnp.array(0, dtype=jnp.int32),
-            rocket_timer=jnp.array(0, dtype=jnp.int32),
+            rocket_timer=jnp.array(self.consts.ROCKET_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
             submarine_x=jnp.array(-1, dtype=jnp.int32),
             submarine_active=jnp.array(False, dtype=jnp.bool_),
-            submarine_timer=jnp.array(0, dtype=jnp.int32),
-            wb_heli_x=jnp.array(-1, dtype=jnp.int32),
-            wb_heli_active=jnp.array(False, dtype=jnp.bool_),
-            wb_heli_timer=jnp.array(0, dtype=jnp.int32),
+            submarine_timer=jnp.array(self.consts.SUBMARINE_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
+            pinkball_x=jnp.array(-1, dtype=jnp.int32),
+            pinkball_active=jnp.array(False, dtype=jnp.bool_),
+            pinkball_timer=jnp.array(self.consts.PINKBALL_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
             wb_ball_hits=jnp.array(0, dtype=jnp.int32),
             wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
             wb_flyer_y=jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
@@ -813,7 +816,7 @@ class JaxJamesBond(
                 splash_active=sweep(state.splash_active, False),
                 rocket_active=sweep(state.rocket_active, False),
                 submarine_active=sweep(state.submarine_active, False),
-                wb_heli_active=sweep(state.wb_heli_active, False),
+                pinkball_active=sweep(state.pinkball_active, False),
                 wb_flyer_active=sweep(state.wb_flyer_active, False),
                 sub_torp_active=sweep(state.sub_torp_active, False),
                 ## A new life gets a fresh shot at the oil rig: clear the
@@ -963,19 +966,19 @@ class JaxJamesBond(
             jnp.stack([
                 state.rocket_x,
                 state.submarine_x,
-                state.wb_heli_x,
+                state.pinkball_x,
                 state.wb_flyer_x,
             ]),
             jnp.stack([
                 state.rocket_y,
                 jnp.array(self.consts.SUBMARINE_Y, dtype=jnp.int32),
-                jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
+                jnp.array(self.consts.PINKBALL_Y, dtype=jnp.int32),
                 state.wb_flyer_y,
             ]),
             jnp.stack([
                 state.rocket_active,
                 state.submarine_active,
-                state.wb_heli_active,
+                state.pinkball_active,
                 state.wb_flyer_active,
             ]),
             self.consts.SUBMARINE_WIDTH,
@@ -1947,6 +1950,23 @@ class JaxJamesBond(
         stage1_start_step = jnp.where(
             entering_stage1, state.step_count, state.stage1_start_step
         )
+
+        entering_stage2 = jnp.logical_and(switch, new_stage == 2)
+        next_rocket_timer = jnp.where(
+            entering_stage2,
+            jnp.array(self.consts.ROCKET_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
+            state.rocket_timer
+        )
+        next_submarine_timer = jnp.where(
+            entering_stage2,
+            jnp.array(self.consts.SUBMARINE_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
+            state.submarine_timer
+        )
+        next_pinkball_timer = jnp.where(
+            entering_stage2,
+            jnp.array(self.consts.PINKBALL_INITIAL_SPAWN_DELAY, dtype=jnp.int32),
+            state.pinkball_timer
+        )
         
         oil_rig_done_reset = jnp.where(entering_stage1, jnp.array(False, dtype=jnp.bool_), state.oil_rig_done)
 
@@ -1960,6 +1980,9 @@ class JaxJamesBond(
         return state.replace(
             stage=new_stage,
             stage1_start_step=stage1_start_step,
+            rocket_timer=next_rocket_timer,
+            submarine_timer=next_submarine_timer,
+            pinkball_timer=next_pinkball_timer,
             oil_rig_done=oil_rig_done_reset,
             stage_transition_timer=clear(state.stage_transition_timer, 0),
             oil_rig_active=clear(state.oil_rig_active, False),
@@ -2121,7 +2144,7 @@ class JaxJamesBond(
         rocket_age = jnp.where(state.rocket_active, state.rocket_age + 1, 0)
         rocket_flying = rocket_age >= self.consts.ROCKET_IGNITE_AGE
         next_rocket_x = jnp.where(
-            state.rocket_active & (~rocket_flying) & scroll_tick,
+            jnp.logical_and(state.rocket_active, jnp.logical_and(rocket_flying, (state.step_count % 5 == 0))),
             state.rocket_x - 1,
             state.rocket_x
         )
@@ -2183,13 +2206,13 @@ class JaxJamesBond(
         next_sub_fired = (state.sub_fired | fire_torp) & next_submarine_active
         ## Pink ball: crosses the sky left to right, 7px every 4 frames
         ## (+2,+2,+2,+1), and leaves at the right edge if nobody pops it
-        next_wb_heli_x = jnp.where(
-            state.wb_heli_active,
-            state.wb_heli_x + jnp.where(state.step_count % 4 == 3, 1, 2),
-            state.wb_heli_x
+        next_pinkball_x = jnp.where(
+            state.pinkball_active,
+            state.pinkball_x + jnp.where(state.step_count % 4 == 3, 1, 2),
+            state.pinkball_x
         )
-        next_wb_heli_active = state.wb_heli_active & (
-            next_wb_heli_x < self.consts.OBJECT_EXIT_X
+        next_pinkball_active = state.pinkball_active & (
+            next_pinkball_x < self.consts.OBJECT_EXIT_X
         )
         ## Rocket bursts only flash; they never spawn a falling object.
 
@@ -2289,7 +2312,7 @@ class JaxJamesBond(
             spawn = in_water_b & (~active) & (next_timer == 0)
             return spawn, next_timer
 
-        ## The rocket appears mid-screen already submerged (measured x~85),
+        ## The rocket appears mid-screen already submerged (measured x~66),
         ## on its 256-frame cycle: ~85 frames of life + this breather.
         spawn_rocket, rocket_timer = waterb_spawner(
             next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
@@ -2306,13 +2329,13 @@ class JaxJamesBond(
         next_sub_fired = next_sub_fired & (~spawn_submarine)
 
         ## The pink ball enters at the LEFT edge (longplay)
-        spawn_wb_heli, wb_heli_timer = waterb_spawner(
-            next_wb_heli_active, state.wb_heli_timer, self.consts.WB_HELI_RESPAWN_FRAMES)
-        next_wb_heli_active = next_wb_heli_active | spawn_wb_heli
-        next_wb_heli_x = jnp.where(
-            spawn_wb_heli,
-            self.consts.GAME_AREA_MIN_X - self.consts.WB_HELI_WIDTH,
-            next_wb_heli_x,
+        spawn_pinkball, pinkball_timer = waterb_spawner(
+            next_pinkball_active, state.pinkball_timer, self.consts.PINKBALL_RESPAWN_FRAMES)
+        next_pinkball_active = next_pinkball_active | spawn_pinkball
+        next_pinkball_x = jnp.where(
+            spawn_pinkball,
+            self.consts.GAME_AREA_MIN_X - self.consts.PINKBALL_WIDTH,
+            next_pinkball_x,
         )
 
         ## Scuba diver: water only, one at a time, entering from the right
@@ -2327,7 +2350,8 @@ class JaxJamesBond(
             steps_into_stage1 >= 1500
         )
         spawn_scuba = in_water & (~state.scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed) & (~next_oil_rig_active)
-        next_scuba_active = state.scuba_active | spawn_scuba
+        scuba_on_screen = next_scuba_x >= (self.consts.GAME_AREA_MIN_X - self.consts.SCUBA_WIDTH)
+        next_scuba_active = (state.scuba_active & scuba_on_screen) | spawn_scuba
         next_scuba_x = jnp.where(
             spawn_scuba,
             jnp.array(self.consts.SCUBA_SPAWN_X, dtype=jnp.int32),
@@ -2476,9 +2500,9 @@ class JaxJamesBond(
             submarine_x=next_submarine_x,
             submarine_active=next_submarine_active,
             submarine_timer=submarine_timer,
-            wb_heli_x=next_wb_heli_x,
-            wb_heli_active=next_wb_heli_active,
-            wb_heli_timer=wb_heli_timer,
+            pinkball_x=next_pinkball_x,
+            pinkball_active=next_pinkball_active,
+            pinkball_timer=pinkball_timer,
             ## Keep the retired observation slot empty, including loaded saves.
             wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
             wb_flyer_y=jnp.array(-1, dtype=jnp.int32),
@@ -2749,12 +2773,12 @@ class JaxJamesBond(
         ball_hit = jnp.logical_and(
             state.stage == 2,
             jnp.logical_and(
-                jnp.logical_and(state.player_bullet_active, state.wb_heli_active),
+                jnp.logical_and(state.player_bullet_active, state.pinkball_active),
                 _aabb_overlap(
                     state.player_bullet_x, state.player_bullet_y,
                     self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
-                    state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
-                    self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT,
+                    state.pinkball_x, jnp.array(self.consts.PINKBALL_Y, dtype=jnp.int32),
+                    self.consts.PINKBALL_WIDTH, self.consts.PINKBALL_HEIGHT,
                 ),
             ),
         )
@@ -2772,7 +2796,7 @@ class JaxJamesBond(
         return state.replace(
             score=(state.score + gained).astype(jnp.int32),
             wb_ball_hits=hits,
-            wb_heli_active=state.wb_heli_active & (~ball_hit),
+            pinkball_active=state.pinkball_active & (~ball_hit),
             player_bullet_active=bullet_keep,
             player_bullet_step=park(bullet_keep, state.player_bullet_step),
             player_bullet_x=park(bullet_keep, state.player_bullet_x),
@@ -2956,9 +2980,9 @@ class JaxJamesBond(
                   self.consts.SUBMARINE_WIDTH, self.consts.SUBMARINE_HEIGHT),
         )
         heli_hit = jnp.logical_and(
-            state.wb_heli_active,
-            touch(state.wb_heli_x, jnp.array(self.consts.WB_HELI_Y, dtype=jnp.int32),
-                  self.consts.WB_HELI_WIDTH, self.consts.WB_HELI_HEIGHT),
+            state.pinkball_active,
+            touch(state.pinkball_x, jnp.array(self.consts.PINKBALL_Y, dtype=jnp.int32),
+                  self.consts.PINKBALL_WIDTH, self.consts.PINKBALL_HEIGHT),
         )
         ## The submarine's double-dot shot, on its diagonal or its run
         ## along the surface, costs a life too
@@ -3732,9 +3756,9 @@ class JamesBondRenderer(JAXGameRenderer):
 
         raster = render_with_switch(
             raster,
-            state.wb_heli_active,
-            state.wb_heli_x,
-            self.consts.WB_HELI_Y,
+            state.pinkball_active,
+            state.pinkball_x,
+            self.consts.PINKBALL_Y,
             self.SHAPE_MASKS["wb_ball"][index_switch],
         )
 
