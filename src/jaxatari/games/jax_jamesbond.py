@@ -2875,6 +2875,11 @@ class JaxJamesBond(
             stage_transition_timer=jnp.where(
                 landed, self.consts.STAGE_TRANSITION_FRAMES, state.stage_transition_timer
             ),
+            score=jnp.where(
+                landed, 
+                state.score + self.consts.SCORE_STAGE_BONUS, 
+                state.score
+            ),
         )
 
     def _resolve_oil_rig_collision(self, state: JamesBondState) -> JamesBondState:
