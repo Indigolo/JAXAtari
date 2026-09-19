@@ -3129,7 +3129,7 @@ class JaxJamesBond(
         pit_right = pit_left + self.consts.PIT_COLLISION_WIDTH
         x_overlap = jnp.logical_and(
             state.player_x < pit_right,
-            state.player_x + self.consts.PLAYER_COLLISION_WIDTH > pit_left,
+            state.player_x + self.consts.PLAYER_COLLISION_WIDTH > pit_left - 3,
         )
         on_ground = (state.player_y == self.consts.PLAYER_INIT_Y)
         pit_collision = jnp.logical_and(
