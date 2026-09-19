@@ -71,8 +71,10 @@ def get_default_asset_config() -> tuple:
             {'name': 'seabed', 'type': 'single', 'file': 'seabed_full.npy'},
             {'name': 'water_sky', 'type': 'single', 'file': 'water_sky.npy'}, ## solid 74,74,74 measured in ALE
             ## The splash frogman's two poses, both pixel-exact extractions
-            {'name': 'splash', 'type': 'single', 'file': 'explosion_1_(small).npy'}, ## TODO: Keep radiation sprites together
-            {'name': 'splash_wide', 'type': 'single', 'file': 'explosion_2.npy'},
+            {
+                'name': 'splash', 'type': 'group', 
+                'files': ['explosion_1_(small).npy', 'explosion_2.npy']
+            },
             ## A bolt sinking past a living frogman is drawn in his colors
             {'name': 'laser_green', 'type': 'single', 'file': 'laser_green.npy'},
             ## Second water scene: darker water and its roster, all cropped
@@ -190,10 +192,10 @@ class JamesBondConstants(struct.PyTreeNode):
     ## episode before the dock bonus could ever pay out.
     MAX_EPISODE_STEPS: int = struct.field(pytree_node=False, default=20000)
 
-    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=8) ##TODO: There is 8 pixels in the diamond sprite, including the shining thing of diamond
-    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=11) ##TODO: There is 11 pixels in the diamond sprite, including the shining thing of diamond 
-    HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Helicopter width is 8 pixels
-    HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6) ## TODO: Helicopter height is 6 pixels
+    DIAMOND_WIDTH: int = struct.field(pytree_node=False, default=8)
+    DIAMOND_HEIGHT: int = struct.field(pytree_node=False, default=11)
+    HELICOPTER_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8)
+    HELICOPTER_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=6)
     HELICOPTER_MELEE_SPRITE_STEPS = jnp.array([ ## 2nd elements are x positions of sprites. Follows the sequence: Sprite 1 -> Nothing -> Sprite 1 -> Nothing -> Sprite 2 -> ...
         (-1,-1), (0,5), (-1,-1), (1,4), (-1,-1), (1,4), (-1,-1), (2,3), (-1,-1), (2,3), 
         (-1,-1), (3,0), (-1,-1), (3,0), (-1,-1), (4,-8), (-1,-1), (4,-8), (-1,-1), (5,-15), 
@@ -205,8 +207,8 @@ class JamesBondConstants(struct.PyTreeNode):
         (-1,-1), (4,-8), (-1,-1), (4,-8), (-1,-1), (5,-15), (-1,-1), (5,-15), (-1,-1), (6,-22), 
         (-1,-1), (6,-22), (-1,-1), (7,-30), (-1,-1), (7,-30), (-1,-1), (8,-38), (-1,-1), (8,-38)
     ], dtype=jnp.int32)
-    SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8) ## TODO: Satellite width is 8 pixels
-    SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14) ## TODO: Satellite height is 14 pixels
+    SATELLITE_ENEMY_WIDTH: int = struct.field(pytree_node=False, default=8)
+    SATELLITE_ENEMY_HEIGHT: int = struct.field(pytree_node=False, default=14)
     BULLET_WIDTH: int = struct.field(pytree_node=False, default=1)
     BULLET_HEIGHT: int = struct.field(pytree_node=False, default=4)
     ## Fire pit sprite size, re-extracted from real frames: the crater top
@@ -247,7 +249,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ## first bomb releases when the heli closes to ~66-70 real px of the player
     ## (that is ~31 in our half width coordinates), later bombs at ~30 real px
     ## (~14 here). The old fixed searchlight zone only matched because the test
-    ## player never moved. TODO: the melee zone probably wants the same
+    ## player never moved.
     ## treatment, talk to Indi before touching it.
     HELICOPTER_BOMB_RANGE: int = struct.field(pytree_node=False, default=75) ## drops observed at 46-75px on the approach side
     HELICOPTER_BOMB_RETRY_FRAMES: int = struct.field(pytree_node=False, default=33) ## same-pass re-drops measured 29-37 frames apart
@@ -409,30 +411,6 @@ class JamesBondConstants(struct.PyTreeNode):
     SATELLITE_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=180) ## First satellite pass is delayed 180 frames after game start
 
     ASSET_CONFIG: tuple = struct.field(pytree_node=False, default_factory=get_default_asset_config)
-
-    ACTION_MEANINGS: Tuple[str, ...] = struct.field( ## TODO: What is this for?
-        pytree_node=False,
-        default=(
-            "NOOP", 
-            "FIRE", 
-            "UP", 
-            "RIGHT", 
-            "LEFT", 
-            "DOWN",
-            "UPRIGHT",
-            "UPLEFT",
-            "DOWNRIGHT",
-            "DOWNLEFT",
-            "UPFIRE",
-            "RIGHTFIRE",
-            "LEFTFIRE",
-            "DOWNFIRE",
-            "UPRIGHTFIRE",
-            "UPLEFTFIRE",
-            "DOWNRIGHTFIRE",
-            "DOWNLEFTFIRE"
-            ),
-    )
 
 
 @struct.dataclass
@@ -604,7 +582,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -653,7 +631,7 @@ class JaxJamesBond(
             pit_x=jnp.array(0, dtype=jnp.int32),
             pit_y=jnp.array(0, dtype=jnp.int32),
             pit_active=jnp.array(False, dtype=jnp.bool_),
-            spawn_diamond_next=jnp.array(False, dtype=jnp.bool_), ## TODO: In state requires this, but is this array or zero-dimensional? Setting False here will make helicopter spawn first, which is true?
+            spawn_diamond_next=jnp.array(False, dtype=jnp.bool_),
             helicopter_x=jnp.array(0, dtype=jnp.int32),
             helicopter_y=jnp.array(0, dtype=jnp.int32),
             helicopter_active=jnp.array(False, dtype=jnp.bool_),
@@ -1036,7 +1014,7 @@ class JaxJamesBond(
     ) -> ObjectObservation:
         """Convert fixed-size object arrays plus masks into ObjectObservation."""
 
-        if orientation is None: ## TODO: Maybe remove if not needed
+        if orientation is None:
             orientation = jnp.zeros_like(x, dtype=jnp.float32)
 
         ## Inactive objects keep drifting in _update_objects, so
@@ -1068,7 +1046,7 @@ class JaxJamesBond(
 
         return jnp.take(self.ACTION_SET, jnp.asarray(action, dtype=jnp.int32))
 
-    def step_player_stage_one( ## TODO: Switch to air logic?
+    def step_player_stage_one( ## Tip: Use air logic function for better memory performance?
         self, args
     ) -> JamesBondState:
         state, atari_action = args
@@ -1221,7 +1199,7 @@ class JaxJamesBond(
         
         player_y = jnp.where(
             player_fast_falling,
-            jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), ## TODO: Copy player_int_y_steps for performance?
+            jnp.clip(player_y + self.consts.PLAYER_IN_Y_STEPS[player_in_air_step] + 1, self.consts.GAME_AREA_MIN_Y, self.consts.GAME_AREA_MAX_Y), ## Tip: Copy player_int_y_steps for performance?
             jnp.where(
                 player_jumping, 
                 player_y - self.consts.PLAYER_IN_Y_STEPS[player_in_air_step], 
@@ -1306,7 +1284,7 @@ class JaxJamesBond(
             player_bullet_active
         )
 
-        return state.replace( ## TODO: Use state.replace or output just the values?
+        return state.replace(
             player_x = player_x,
             player_y = player_y,
 
@@ -1354,7 +1332,7 @@ class JaxJamesBond(
                 player_y != self.consts.PLAYER_INIT_Y
             ), 
             True, 
-            player_falling ## TODO: or False?
+            player_falling
         )
         
         player_fast_falling = jnp.where(
@@ -1419,7 +1397,7 @@ class JaxJamesBond(
             )
         )
 
-        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+        return state.replace(
             player_y = player_y,
 
             player_jumping = player_jumping,
@@ -1465,7 +1443,7 @@ class JaxJamesBond(
                 player_y != self.consts.PLAYER_INIT_Y
             ), 
             True, 
-            player_floating ## TODO: or False?
+            player_floating
         )
         
         ## UP while under water rushes the boat back to the surface, the
@@ -1532,7 +1510,7 @@ class JaxJamesBond(
             )
         )
 
-        return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+        return state.replace(
             player_y = player_y,
 
             player_diving = player_diving,
@@ -1722,7 +1700,7 @@ class JaxJamesBond(
                 player_bullet_active
             )
 
-            return state.replace( ## TODO: Use state.replace or output just the values? Use astypes?
+            return state.replace(
                 player_bullet_active = player_bullet_active,
                 player_bullet_step = player_bullet_step,
                 player_bullet_x = player_bullet_x,
@@ -1854,7 +1832,7 @@ class JaxJamesBond(
             jnp.logical_and(
                 fire_pressed,
                 jnp.logical_and(
-                    state.player_wbullet_step >= 8, ## TODO: Maybe more?
+                    state.player_wbullet_step >= 8, ## Tip: Maybe more? ALE is too buggy to check well
                     ~state.player_bullet_active,
                 )
             ),
@@ -1921,7 +1899,7 @@ class JaxJamesBond(
             (state, atari_action)
         )
 
-    def _update_stage(self, state: JamesBondState) -> JamesBondState: ## TODO: Delete unneccessary variables
+    def _update_stage(self, state: JamesBondState) -> JamesBondState:
 
         lives_lost = self.consts.MAX_LIVES - state.lives
 
@@ -2270,7 +2248,6 @@ class JaxJamesBond(
 
         # === 2. Spawning logic ===
         ## Stage 1 (water) delay timing logic for scuba and oil rig
-        ## TODO: Before spawining logic, will add the logic of cooldown, so we can't have two same objects spawning at the same time on screen, also helicopter and diamond spawn alternatively
         ## Rule: Alternative spawning only when the entire row is empty
         on_land = state.stage == 0
         in_water = state.stage == 1
@@ -2406,7 +2383,7 @@ class JaxJamesBond(
         )
         next_helicopter_y = jnp.where(
             spawn_helicopter,
-            57, ## TODO: Helicopter spawn height, will change if the number is wrong
+            57,
             next_helicopter_y
         )
         ## Satellite
@@ -2419,12 +2396,10 @@ class JaxJamesBond(
         )
         next_satellite_y = jnp.where(
             can_spawn_satellite,
-            75, ## TODO: Satellite spawn height, will change if the number is wrong
+            75,
             next_satellite_y
         )
         ## Fire pit
-        ## TODO: The spawn of fire pit is a little bit complicated, first one spawn at x=124, but from the next one it will spawn at GAME_AREA_MAX_X, and the next one always spawn even the previous one is still on screen(as far as i checked, after the yellow part of fire pit disappears on GAME_AREA_MIN_X)
-        ## TODO: Now i apply the same logic as enemy and diamond, which is only spawn when the entire row is empty, will change it after we discuss about it
         ## The pit is a single scalar object (see reset and _render_pit), so
         ## spawn with plain jnp.where instead of array indexing.
         next_pit_active = next_pit_active | can_spawn_pit
@@ -2920,9 +2895,9 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
-            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+            stage1_start_step=jnp.where( ## For proper oil rig spawning
                 took_damage,
-                state.step_count,
+                state.step_count, ## Tip: Maybe change to step_count + 2000 if you want to start from scuba
                 state.stage1_start_step,
             ),
             hit_cooldown=jnp.where(
@@ -3046,7 +3021,7 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - splash_hit.astype(jnp.int32)
             ).astype(jnp.int32),
-            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+            stage1_start_step=jnp.where( ## For proper oil rig spawning
                 splash_hit,
                 state.step_count,
                 state.stage1_start_step,
@@ -3112,7 +3087,7 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - took_damage.astype(jnp.int32)
             ).astype(jnp.int32),
-            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+            stage1_start_step=jnp.where( ## For proper oil rig spawning
                 took_damage,
                 state.step_count,
                 state.stage1_start_step,
@@ -3219,7 +3194,7 @@ class JaxJamesBond(
         return state.replace(
             diamond_shot=collected,
             sky_flash_timer=next_sky_flash_timer,
-            diamond_active = jnp.logical_and( ## TODO: change diamond x and y? 
+            diamond_active = jnp.logical_and( ## Tip: reset diamond x and y?
                 state.diamond_active, ~collected
             ),
             player_bullet_active=player_bullet_active,
@@ -3278,7 +3253,7 @@ class JaxJamesBond(
             lives=jnp.maximum(
                 0, state.lives - splash_hit.astype(jnp.int32)
             ).astype(jnp.int32),
-            stage1_start_step=jnp.where( ## For proper oil rig spawning; TODO: Maybe change to 2000+
+            stage1_start_step=jnp.where( ## For proper oil rig spawning
                 splash_hit,
                 state.step_count,
                 state.stage1_start_step,
@@ -3506,7 +3481,7 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS['life'], 16, 3,
         )
 
-        ## Render black borders on the sides of the screen; TODO: Optimize
+        ## Render black borders on the sides of the screen
         raster = self.jr.render_at(
             raster,
             0,
@@ -3522,7 +3497,7 @@ class JamesBondRenderer(JAXGameRenderer):
         
         ## Render Score counter
         score_digits = self.jr.int_to_digits(state.score, 5)
-        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 5) ## TODO: Position offset per digit?
+        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 5)
 
         return self.jr.render_from_palette(raster, self.PALETTE)
 
@@ -3605,13 +3580,13 @@ class JamesBondRenderer(JAXGameRenderer):
                     rr,
                     state.scuba_x,
                     jnp.array(self.consts.SPLASH_Y, dtype=jnp.int32),
-                    self.SHAPE_MASKS['splash'],
+                    self.SHAPE_MASKS['splash'][0],
                 ),
                 lambda rr: self.jr.render_at_clipped(
                     rr,
                     state.scuba_x - 4,
                     jnp.array(self.consts.SPLASH_Y, dtype=jnp.int32),
-                    self.SHAPE_MASKS['splash_wide'],
+                    self.SHAPE_MASKS['splash'][1],
                 ),
                 r,
             )
@@ -3643,11 +3618,11 @@ class JamesBondRenderer(JAXGameRenderer):
                 narrow,
                 lambda rr: self.jr.render_at_clipped(
                     rr, state.splash_x, self.consts.SPLASH_Y,
-                    self.SHAPE_MASKS['splash'],
+                    self.SHAPE_MASKS['splash'][0],
                 ),
                 lambda rr: self.jr.render_at_clipped(
                     rr, state.splash_x - 4, self.consts.SPLASH_Y,
-                    self.SHAPE_MASKS['splash_wide'],
+                    self.SHAPE_MASKS['splash'][1],
                 ),
                 r,
             )
