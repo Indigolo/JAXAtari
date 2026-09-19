@@ -3,6 +3,7 @@ env
 
 .venv
 .vscode
+.vs
 .idea
 *.bc
 results/
@@ -10,3 +11,5 @@ results/
 docs/build/
 .python-version
 
+.venv312/
+.venv312/
