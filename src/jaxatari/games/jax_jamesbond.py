@@ -97,7 +97,10 @@ def get_default_asset_config() -> tuple:
                 'name': 'wb_ball', 'type': 'group',
                 'files': ['ball_sideways.npy', 'ball_frontal.npy']
             },
-            {'name': 'rocket_ball', 'type': 'single', 'file': 'rocket_ball.npy'},
+            {
+                'name': 'rocket_ball', 'type': 'group', 
+                'files': ['rocket_ball.npy', 'rocket_ball_narrow.npy']
+            },
             {
                 'name': 'scuba', 'type': 'group',
                 'files': ['scuba_1.npy', 'scuba_2.npy']
@@ -124,7 +127,7 @@ def get_default_asset_config() -> tuple:
             ## sparkle alternating between two dot patterns (video)
             {
                 'name': 'debris_splash', 'type': 'group',
-                'files': ['wc_splash_1.npy', 'wc_splash_2.npy']
+                'files': ['rocket_splash_1.npy', 'rocket_splash_2.npy']
             },
         ]
         return asset_config
@@ -351,6 +354,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_IGNITE_AGE: int = struct.field(pytree_node=False, default=6) ## floats briefly, then climbs
     ROCKET_EXPLODE_Y: int = struct.field(pytree_node=False, default=61) ## tip row where it bursts
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
+    DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
     ROCKET_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=300) ## First rocket pass is delayed 300 frames after entering stage 2
     SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
@@ -582,7 +586,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2134,6 +2138,7 @@ class JaxJamesBond(
         rocket_explodes = in_water_b & state.rocket_active & (
             next_rocket_y <= self.consts.ROCKET_EXPLODE_Y
         )
+        player_hit_from_explosion = rocket_explodes & (state.player_y <= self.consts.PLAYER_INIT_Y)
         next_rocket_active = state.rocket_active & (~rocket_explodes) & (
             next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
         )
@@ -2425,12 +2430,12 @@ class JaxJamesBond(
         return state.replace(
             diamond_x=next_diamond_x,
             ## Reaching burst height means the player missed the rocket.
-            ## Charge one life on that event, then use the usual death freeze
+            ## Charge one life on that event, if player is not underwater.
             ## and cooldown so neither the flash nor a simultaneous hit can
             ## charge another life. Shooting it earlier prevents the burst.
-            lives=jnp.maximum(state.lives - rocket_explodes.astype(jnp.int32), 0),
-            hit_cooldown=jnp.where(rocket_explodes, self.consts.HIT_COOLDOWN_STEPS, state.hit_cooldown),
-            death_timer=jnp.where(rocket_explodes, self.consts.DEATH_ANIMATION_FRAMES, state.death_timer),
+            lives = jnp.maximum(state.lives - player_hit_from_explosion.astype(jnp.int32), 0),
+            hit_cooldown=jnp.where(player_hit_from_explosion, self.consts.HIT_COOLDOWN_STEPS, state.hit_cooldown),
+            death_timer=jnp.where(player_hit_from_explosion, self.consts.DEATH_ANIMATION_FRAMES, state.death_timer),
             diamond_y=next_diamond_y,
             diamond_active=next_diamond_active,
             helicopter_x=next_helicopter_x,
@@ -3773,7 +3778,7 @@ class JamesBondRenderer(JAXGameRenderer):
             rocket_ball_spawn, 
             state.rocket_x + 2, 
             state.rocket_y, 
-            self.SHAPE_MASKS["rocket_ball"]
+            self.SHAPE_MASKS["rocket_ball"][index_switch]
         )
         
         return raster
