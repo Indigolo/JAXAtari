@@ -3500,9 +3500,26 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS['black_border']
         )
         
-        ## Render Score counter
-        score_digits = self.jr.int_to_digits(state.score, 5)
-        raster = self.jr.render_label(raster, 95, 15, score_digits, self.SHAPE_MASKS['score_digits'], 8, 5)
+        ## Render Score counter (From Seaquest)
+        max_score_digits = 5
+        score_digits = self.jr.int_to_digits(state.score, max_digits=max_score_digits)
+        clamped_score = jnp.minimum(jnp.maximum(state.score, 0), 10**max_score_digits - 1)
+        score_digit_thresholds = jnp.array([1, 10, 100, 1000, 10000, 100000], dtype=clamped_score.dtype)
+        num_score_digits = jnp.maximum(1, jnp.sum(clamped_score >= score_digit_thresholds))
+        score_start_index = max_score_digits - num_score_digits
+        score_x = 59 + score_start_index * 8
+
+        raster = self.jr.render_label_selective(
+            raster,
+            score_x,
+            9,
+            score_digits,
+            self.SHAPE_MASKS['score_digits'],
+            score_start_index,
+            num_score_digits,
+            spacing=8,
+            max_digits_to_render=max_score_digits,
+        )
 
         return self.jr.render_from_palette(raster, self.PALETTE)
 
