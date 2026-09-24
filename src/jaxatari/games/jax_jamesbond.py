@@ -345,8 +345,8 @@ class JamesBondConstants(struct.PyTreeNode):
     ## appears mid-screen already submerged (tip row ~140), floats a few
     ## frames, climbs at exactly 1px/frame straight up (a single-frame
     ## splash blip marks the waterline crossing), and EXPLODES with its
-    ## tip at row 61. It remains visible in a brief gray flash, then
-    ## disappears without dropping debris. One rocket every 256 frames.
+    ## tip at row 61 in a brief gray flash, dropping a red bomb that falls
+    ## to the waterline and sparkles there. One rocket every 256 frames.
     ROCKET_WIDTH: int = struct.field(pytree_node=False, default=8)
     ROCKET_HEIGHT: int = struct.field(pytree_node=False, default=11)
     ROCKET_Y: int = struct.field(pytree_node=False, default=142) ## rests low in the water; a diving boat can ram it
@@ -378,10 +378,17 @@ class JamesBondConstants(struct.PyTreeNode):
     SCORE_BALL: int = struct.field(pytree_node=False, default=500)
     WB_BALL_HITS_TO_EXIT: int = struct.field(pytree_node=False, default=3)
     PINKBALL_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=200) ## First pinkball pass is delayed 200 frames after entering stage 2
-    ## Legacy dimensions for the retired debris observation slot.
+    ## Rocket debris (the wb_flyer slot): born where the rocket bursts,
+    ## falls 1px/frame to the waterline, sparkles there red/pink for a
+    ## moment, then vanishes. Lethal on contact; the anti-air shot pops it.
     WB_FLYER_Y: int = struct.field(pytree_node=False, default=61)
     WB_FLYER_WIDTH: int = struct.field(pytree_node=False, default=4)
     WB_FLYER_HEIGHT: int = struct.field(pytree_node=False, default=5)
+    DEBRIS_REST_Y: int = struct.field(pytree_node=False, default=119)
+    DEBRIS_REST_FRAMES: int = struct.field(pytree_node=False, default=40)
+    DEBRIS_SPLASH_Y: int = struct.field(pytree_node=False, default=118)
+    DEBRIS_SPLASH_FLIP_FRAMES: int = struct.field(pytree_node=False, default=6) ## pattern swap cadence
+    SCORE_DEBRIS_SHOT: int = struct.field(pytree_node=False, default=100)
     ## Submarine, water B and C alike (longplay, 60 fps): it enters from
     ## the LEFT edge and cruises right, 2 px every 3 frames. Once per pass,
     ## as it crosses SUB_FIRE_X, it fires a double-dot shot from its bow
@@ -512,9 +519,9 @@ class JamesBondState:
     pinkball_active: chex.Array
     pinkball_timer: chex.Array
     wb_ball_hits: chex.Array ## pink balls shot this scene (water B exit counter)
-    ## Retired debris slot stays inactive; retain the observation layout.
+    ## Rocket explosion debris (the falling red bomb); timer is its age
     wb_flyer_x: chex.Array
-    wb_flyer_y: chex.Array ## retired debris slot, kept for observation/checkpoint compatibility
+    wb_flyer_y: chex.Array ## falls from the burst row to the waterline
     wb_flyer_active: chex.Array
     wb_flyer_timer: chex.Array
     ## Submarine's double-dot shot
@@ -2197,7 +2204,36 @@ class JaxJamesBond(
         next_pinkball_active = state.pinkball_active & (
             next_pinkball_x < self.consts.OBJECT_EXIT_X
         )
-        ## Rocket bursts only flash; they never spawn a falling object.
+        ## Rocket debris: drifts with the world and falls 1px/frame to the
+        ## waterline (its clock is held while falling), sparkles there, then goes.
+        debris_age = jnp.where(state.wb_flyer_active, state.wb_flyer_timer + 1, 0)
+        next_wb_flyer_x = jnp.where(
+            state.wb_flyer_active & scroll_tick,
+            state.wb_flyer_x - 1,
+            state.wb_flyer_x
+        )
+        debris_falling = state.wb_flyer_y < self.consts.DEBRIS_REST_Y
+        next_wb_flyer_y = jnp.where(
+            state.wb_flyer_active & debris_falling,
+            state.wb_flyer_y + 1,
+            state.wb_flyer_y
+        )
+        debris_age = jnp.where(debris_falling, 0, debris_age)
+        next_wb_flyer_active = in_water_b & state.wb_flyer_active & (
+            debris_age < self.consts.DEBRIS_REST_FRAMES
+        )
+        next_wb_flyer_active = next_wb_flyer_active | rocket_explodes
+        next_wb_flyer_x = jnp.where(
+            rocket_explodes,
+            next_rocket_x + (self.consts.ROCKET_WIDTH - self.consts.WB_FLYER_WIDTH) // 2,
+            next_wb_flyer_x,
+        )
+        next_wb_flyer_y = jnp.where(
+            rocket_explodes,
+            jnp.array(self.consts.WB_FLYER_Y, dtype=jnp.int32),
+            next_wb_flyer_y,
+        )
+        debris_age = jnp.where(rocket_explodes, 0, debris_age)
 
         # Enemies
         ## Helicopter enemy (Scroll left)
@@ -2483,11 +2519,10 @@ class JaxJamesBond(
             pinkball_x=next_pinkball_x,
             pinkball_active=next_pinkball_active,
             pinkball_timer=pinkball_timer,
-            ## Keep the retired observation slot empty, including loaded saves.
-            wb_flyer_x=jnp.array(-1, dtype=jnp.int32),
-            wb_flyer_y=jnp.array(-1, dtype=jnp.int32),
-            wb_flyer_active=jnp.array(False, dtype=jnp.bool_),
-            wb_flyer_timer=jnp.array(0, dtype=jnp.int32),
+            wb_flyer_x=next_wb_flyer_x,
+            wb_flyer_y=next_wb_flyer_y.astype(jnp.int32),
+            wb_flyer_active=next_wb_flyer_active,
+            wb_flyer_timer=debris_age,
             sub_torp_x=next_torp_x,
             sub_torp_y=next_torp_y,
             sub_torp_active=next_torp_active,
@@ -2739,8 +2774,37 @@ class JaxJamesBond(
         state = self._resolve_pit_player_collisions(state)
         state = self._resolve_splash_player_collisions(state)
         state = self._resolve_waterb_collisions(state)
+        state = self._resolve_debris_contacts(state)
         state = self._resolve_oil_rig_collision(state)
         return state
+
+    def _resolve_debris_contacts(self, state: JamesBondState) -> JamesBondState:
+        """Water B: the falling / sparkling red rocket debris costs a life."""
+
+        debris_hit = jnp.logical_and(
+            jnp.logical_and(state.stage == 2, state.wb_flyer_active),
+            _aabb_overlap(
+                state.player_x, state.player_y,
+                self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
+                state.wb_flyer_x, state.wb_flyer_y,
+                self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
+            ),
+        )
+        took_damage = jnp.logical_and(debris_hit, state.hit_cooldown <= 0)
+
+        return state.replace(
+            lives=jnp.maximum(0, state.lives - took_damage.astype(jnp.int32)).astype(jnp.int32),
+            hit_cooldown=jnp.where(
+                took_damage,
+                jnp.array(self.consts.HIT_COOLDOWN_STEPS, dtype=jnp.int32),
+                state.hit_cooldown,
+            ),
+            death_timer=jnp.where(
+                took_damage,
+                jnp.array(self.consts.DEATH_ANIMATION_FRAMES, dtype=jnp.int32),
+                state.death_timer,
+            ),
+        )
 
     def _resolve_waterb_ball_shot(self, state: JamesBondState) -> JamesBondState:
         """Water B: the anti-air shot pops the pink ball for 500.
@@ -2784,12 +2848,14 @@ class JaxJamesBond(
         )
 
     def _resolve_water_shots(self, state: JamesBondState) -> JamesBondState:
-        """Water B: the player's rounds hit the rocket and submarine.
+        """Water B: the player's rounds hit the rocket, its debris and the
+        submarine.
 
         Read off the longplay: the anti-air shot destroys a climbing
         rocket and the depth charge a submerged or surfacing one (+200,
         6500 -> 6700 the moment the shot touched it); the depth charge
-        sinks the submarine for 200. The used round is consumed on impact.
+        sinks the submarine for 200; the anti-air shot pops the falling
+        debris for 100. The used round is consumed on impact.
         """
 
         in_water_b = state.stage == 2
@@ -2814,6 +2880,18 @@ class JaxJamesBond(
             rocket_hits(state.player_wbullet_x, state.player_wbullet_y, state.player_wbullet_active),
         )
         rocket_hit = air_hit | water_hit
+        debris_hit = jnp.logical_and(
+            jnp.logical_and(in_water_b, state.player_bullet_active),
+            jnp.logical_and(
+                state.wb_flyer_active,
+                _aabb_overlap(
+                    state.player_bullet_x, state.player_bullet_y,
+                    self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                    state.wb_flyer_x, state.wb_flyer_y,
+                    self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
+                ),
+            ),
+        )
         sub_hit = jnp.logical_and(
             jnp.logical_and(in_water_b, state.player_wbullet_active),
             jnp.logical_and(
@@ -2826,10 +2904,11 @@ class JaxJamesBond(
                 ),
             ),
         )
-        air_used = air_hit
+        air_used = air_hit | debris_hit
         water_used = water_hit | sub_hit
         gained = (
             rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET
+            + debris_hit.astype(jnp.int32) * self.consts.SCORE_DEBRIS_SHOT
             + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
         )
 
@@ -2841,6 +2920,7 @@ class JaxJamesBond(
         return state.replace(
             score=(state.score + gained).astype(jnp.int32),
             rocket_active=state.rocket_active & (~rocket_hit),
+            wb_flyer_active=state.wb_flyer_active & (~debris_hit),
             submarine_active=state.submarine_active & (~sub_hit),
             player_bullet_active=air_keep,
             player_bullet_step=park(air_keep, state.player_bullet_step),
@@ -3772,15 +3852,25 @@ class JamesBondRenderer(JAXGameRenderer):
             self.SHAPE_MASKS["sub_shot"][index_switch],
         )
 
-        rocket_ball_spawn = (state.rocket_y - 1 <= self.consts.ROCKET_EXPLODE_Y) & (state.death_timer > 0)
+        ## Rocket debris: the red bomb while falling, then the red / pink
+        ## sparkle (two dot patterns swapping) once it rests at the waterline
+        debris_resting = state.wb_flyer_y >= self.consts.DEBRIS_REST_Y
+        splash_pose = (state.step_count // self.consts.DEBRIS_SPLASH_FLIP_FRAMES) % 2
         raster = render_with_switch(
-            raster, 
-            rocket_ball_spawn, 
-            state.rocket_x + 2, 
-            state.rocket_y, 
-            self.SHAPE_MASKS["rocket_ball"][index_switch]
+            raster,
+            state.wb_flyer_active & (~debris_resting),
+            state.wb_flyer_x,
+            state.wb_flyer_y,
+            self.SHAPE_MASKS["rocket_ball"][index_switch],
         )
-        
+        raster = render_with_switch(
+            raster,
+            state.wb_flyer_active & debris_resting,
+            state.wb_flyer_x - 1,
+            self.consts.DEBRIS_SPLASH_Y,
+            self.SHAPE_MASKS["debris_splash"][splash_pose],
+        )
+
         return raster
 
     def _render_stars(self, raster: jnp.ndarray, state: JamesBondState) -> jnp.ndarray:
