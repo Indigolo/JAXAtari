@@ -361,7 +361,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
     SUBMARINE_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=260)
-    SUBMARINE_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=320) ## First submarine pass is delayed 320 frames after entering stage 2
+    SUBMARINE_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=150) ## First submarine pass is delayed 150 frames after entering stage 2
     ## The pink ball (fields still called pinkball_*): enters at the LEFT
     ## edge at row 57 and crosses to the right at 1.75 px/f (7 px every 4
     ## frames, read off the longplay at 60 fps). The anti-air shot pops
@@ -2338,7 +2338,11 @@ class JaxJamesBond(
         spawn_rocket, rocket_timer = waterb_spawner(
             next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
         next_rocket_active = next_rocket_active | spawn_rocket
-        next_rocket_x = jnp.where(spawn_rocket, self.consts.ROCKET_SPAWN_X, next_rocket_x)
+        next_rocket_x = jnp.where(
+            spawn_rocket, 
+            jnp.maximum(self.consts.ROCKET_SPAWN_X, state.player_x + 30),
+            next_rocket_x
+        )
         next_rocket_y = jnp.where(spawn_rocket, self.consts.ROCKET_Y, next_rocket_y)
         rocket_age = jnp.where(spawn_rocket, 0, rocket_age)
 
