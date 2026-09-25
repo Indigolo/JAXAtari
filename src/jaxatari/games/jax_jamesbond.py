@@ -2786,8 +2786,8 @@ class JaxJamesBond(
             _aabb_overlap(
                 state.player_x, state.player_y,
                 self.consts.PLAYER_COLLISION_WIDTH, self.consts.PLAYER_COLLISION_HEIGHT,
-                state.wb_flyer_x, state.wb_flyer_y,
-                self.consts.WB_FLYER_WIDTH, self.consts.WB_FLYER_HEIGHT,
+                state.wb_flyer_x - 1, state.wb_flyer_y,
+                self.consts.WB_FLYER_WIDTH + 2, self.consts.WB_FLYER_HEIGHT,
             ),
         )
         took_damage = jnp.logical_and(debris_hit, state.hit_cooldown <= 0)
