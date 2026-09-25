@@ -594,7 +594,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "2"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2772,18 +2772,45 @@ class JaxJamesBond(
     def _resolve_collisions(self, state: JamesBondState) -> JamesBondState:
         """Run all collision systems after movement and object updates."""
 
-        state = self._resolve_bullet_diamond_collisions(state)
-        state = self._resolve_wbullet_scuba_collisions(state)
-        state = self._resolve_bullet_oil_rig_collisions(state)
-        state = self._resolve_waterb_ball_shot(state)
-        state = self._resolve_water_shots(state)
-        state = self._resolve_bullet_player_collisions(state)
-        state = self._resolve_pit_player_collisions(state)
-        state = self._resolve_splash_player_collisions(state)
-        state = self._resolve_waterb_collisions(state)
-        state = self._resolve_debris_contacts(state)
-        state = self._resolve_oil_rig_collision(state)
-        return state
+        stage = state.stage
+
+        new_state = lax.switch(
+            stage,
+            (
+                self._resolve_stage_one_collisions,
+                self._resolve_stage_two_collisions,
+                self._resolve_stage_three_collisions,
+            ),
+            state,
+        )
+
+        return new_state
+
+    def _resolve_stage_one_collisions(self, state: JamesBondState) -> JamesBondState:
+        new_state = self._resolve_bullet_diamond_collisions(state)
+        new_state = self._resolve_pit_player_collisions(new_state)
+        new_state = self._resolve_bullet_player_collisions(new_state)
+
+        return new_state
+
+    def _resolve_stage_two_collisions(self, state: JamesBondState) -> JamesBondState:
+        new_state = self._resolve_bullet_diamond_collisions(state)
+        new_state = self._resolve_wbullet_scuba_collisions(new_state)
+        new_state = self._resolve_bullet_oil_rig_collisions(new_state)
+        new_state = self._resolve_bullet_player_collisions(new_state)
+        new_state = self._resolve_splash_player_collisions(new_state)
+        new_state = self._resolve_oil_rig_collision(new_state)
+
+        return new_state
+
+    def _resolve_stage_three_collisions(self, state: JamesBondState) -> JamesBondState:
+        new_state = self._resolve_waterb_ball_shot(state)
+        new_state = self._resolve_water_shots(new_state)
+        new_state = self._resolve_waterb_collisions(new_state)
+        new_state = self._resolve_debris_contacts(new_state)
+
+        return new_state
+
 
     def _resolve_debris_contacts(self, state: JamesBondState) -> JamesBondState:
         """Water B: the falling / sparkling red rocket debris costs a life."""
@@ -3269,61 +3296,6 @@ class JaxJamesBond(
             ),
         )
 
-    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
-        """Collect active diamonds that overlap a player shot.
-
-        Both shots count: the land round and the water anti-air round fly
-        the same up-forward path, and shooting the floating gem is worth
-        +50 in every scene (verified in ALE on land and over the water).
-        """
-
-        ## Both animation poses have their solid gem at x+1..5, y+3..8.
-        ## The sprite's first rows contain sparkles; anchoring the hitbox
-        ## there excluded the bottom tip and let visible hits pass through.
-        overlap = _aabb_overlap(
-            state.player_bullet_x,
-            state.player_bullet_y,
-            self.consts.BULLET_WIDTH,
-            self.consts.BULLET_HEIGHT,
-            state.diamond_x + 1, ## For better hit boxes
-            state.diamond_y + 3,
-            self.consts.DIAMOND_COLLISION_WIDTH,
-            self.consts.DIAMOND_COLLISION_HEIGHT,
-        )
-
-        collected = jnp.logical_and(
-            jnp.logical_and(state.diamond_active, state.player_bullet_active),
-            overlap,
-        )
-
-        player_bullet_active = jnp.logical_and(
-            state.player_bullet_active, ~collected
-        )
-
-        next_sky_flash_timer = jnp.where(
-            collected & (state.stage == 1),
-            self.consts.DIAMOND_FLASH_FRAMES,
-            state.sky_flash_timer,
-        )
-
-        new_score = state.score + collected * self.consts.SCORE_DIAMOND
-
-        def park(active, v):
-            return jnp.where(active, v, -1)
-
-        return state.replace(
-            diamond_shot=collected,
-            sky_flash_timer=next_sky_flash_timer,
-            diamond_active = jnp.logical_and( ## Tip: reset diamond x and y?
-                state.diamond_active, ~collected
-            ),
-            player_bullet_active=player_bullet_active,
-            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
-            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
-            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
-            score=new_score
-        )
-
     def scuba_collisions_logic(self, state: JamesBondState) -> JamesBondState:
         """The depth charge removes the diver and pays SCORE_SCUBA.
 
@@ -3463,6 +3435,61 @@ class JaxJamesBond(
             player_wbullet_step=park(player_wbullet_active, state.player_wbullet_step),
             player_wbullet_x=park(player_wbullet_active, state.player_wbullet_x),
             player_wbullet_y=park(player_wbullet_active, state.player_wbullet_y),
+        )
+
+    def collectible_collisions_logic(self, state: JamesBondState) -> JamesBondState:
+        """Collect active diamonds that overlap a player shot.
+
+        Both shots count: the land round and the water anti-air round fly
+        the same up-forward path, and shooting the floating gem is worth
+        +50 in every scene (verified in ALE on land and over the water).
+        """
+
+        ## Both animation poses have their solid gem at x+1..5, y+3..8.
+        ## The sprite's first rows contain sparkles; anchoring the hitbox
+        ## there excluded the bottom tip and let visible hits pass through.
+        overlap = _aabb_overlap(
+            state.player_bullet_x,
+            state.player_bullet_y,
+            self.consts.BULLET_WIDTH,
+            self.consts.BULLET_HEIGHT,
+            state.diamond_x + 1, ## For better hit boxes
+            state.diamond_y + 3,
+            self.consts.DIAMOND_COLLISION_WIDTH,
+            self.consts.DIAMOND_COLLISION_HEIGHT,
+        )
+
+        collected = jnp.logical_and(
+            jnp.logical_and(state.diamond_active, state.player_bullet_active),
+            overlap,
+        )
+
+        player_bullet_active = jnp.logical_and(
+            state.player_bullet_active, ~collected
+        )
+
+        next_sky_flash_timer = jnp.where(
+            collected & (state.stage == 1),
+            self.consts.DIAMOND_FLASH_FRAMES,
+            state.sky_flash_timer,
+        )
+
+        new_score = state.score + collected * self.consts.SCORE_DIAMOND
+
+        def park(active, v):
+            return jnp.where(active, v, -1)
+
+        return state.replace(
+            diamond_shot=collected,
+            sky_flash_timer=next_sky_flash_timer,
+            diamond_active = jnp.logical_and( ## Tip: reset diamond x and y?
+                state.diamond_active, ~collected
+            ),
+            player_bullet_active=player_bullet_active,
+            player_bullet_step=park(player_bullet_active, state.player_bullet_step),
+            player_bullet_x=park(player_bullet_active, state.player_bullet_x),
+            player_bullet_y=park(player_bullet_active, state.player_bullet_y),
+            score=new_score
         )
     
     def _resolve_bullet_diamond_collisions(self, state: JamesBondState) -> JamesBondState:
