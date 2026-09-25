@@ -356,7 +356,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
     DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
     ROCKET_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=300) ## First rocket pass is delayed 300 frames after entering stage 2
-    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=30) ## rocket remains in the gray burst flash for about 0.27 seconds
+    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=30)
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
@@ -2152,7 +2152,7 @@ class JaxJamesBond(
         sky_flash_timer = jnp.where(rocket_explodes, self.consts.SKY_FLASH_FRAMES, state.sky_flash_timer)
 
         player_hit_from_explosion = ((state.stage == 2) & (sky_flash_timer > 0)) & (state.player_y <= self.consts.PLAYER_INIT_Y)
-        
+
         ## Submarine (longplay): enters from the LEFT and cruises right,
         ## 2px every 3 frames
         sub_dx = jnp.where(state.step_count % 3 != 0, 1, 0)
