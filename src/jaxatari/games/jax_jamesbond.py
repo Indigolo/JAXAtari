@@ -302,7 +302,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ## 7x20 vertical diver ran 333 frames); the ~120 frame figure floating
     ## around belongs to the surface splash creature, not to him.
     SCUBA_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=333)
-    SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=150) ## breather between divers
+    SCUBA_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=5) ## breather between divers
     ## Radioactivity in the first water scene has two independent rules:
     ##   no diver on screen             -> a spent satellite bolt may create
     ##                                     the radioactive surface splash
@@ -312,7 +312,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ## bolt to land. Distance is horizontal because the diver remains below
     ## the surface while the boat can jump or dive.
     SCUBA_RADIOACTIVE_RANGE: int = struct.field(pytree_node=False, default=40)
-    SCUBA_RADIOACTIVE_FRAMES: int = struct.field(pytree_node=False, default=120) ## how long he stays radioactive
+    SCUBA_RADIOACTIVE_FRAMES: int = struct.field(pytree_node=False, default=220) ## how long he stays radioactive
     ## The laser bolt splashes THROUGH the surface: it keeps falling under
     ## water and detonates into a static green surface explosion that
     ## rides the world scroll, blocks the lane for a while, and kills the
@@ -594,7 +594,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2339,7 +2339,7 @@ class JaxJamesBond(
             next_rocket_active, state.rocket_timer, self.consts.ROCKET_RESPAWN_FRAMES)
         next_rocket_active = next_rocket_active | spawn_rocket
         next_rocket_x = jnp.where(
-            spawn_rocket, 
+            spawn_rocket,
             jnp.maximum(self.consts.ROCKET_SPAWN_X, state.player_x + 30),
             next_rocket_x
         )
@@ -2376,7 +2376,7 @@ class JaxJamesBond(
         )
         spawn_scuba = in_water & (~state.scuba_active) & (scuba_respawn_timer == 0) & (scuba_delay_passed) & (~next_oil_rig_active)
         scuba_on_screen = next_scuba_x >= (self.consts.GAME_AREA_MIN_X - self.consts.SCUBA_WIDTH)
-        next_scuba_active = (state.scuba_active & scuba_on_screen) | spawn_scuba
+        next_scuba_active = ((state.scuba_active & scuba_on_screen) | spawn_scuba) & (state.scuba_radioactive_age != self.consts.SCUBA_RADIOACTIVE_FRAMES)
         next_scuba_x = jnp.where(
             spawn_scuba,
             jnp.array(self.consts.SCUBA_SPAWN_X, dtype=jnp.int32),
