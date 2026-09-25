@@ -405,6 +405,7 @@ class JamesBondConstants(struct.PyTreeNode):
 
     ## The depth charge sinks the submarine (longplay: +200 each time)
     SCORE_SUBMARINE_SHOT: int = struct.field(pytree_node=False, default=200)
+    SCORE_TORPEDO_SHOT: int = struct.field(pytree_node=False, default=100)
 
     ## Water scene: the satellite stops using the kitchen timer and instead
     ## releases its laser when it passes directly above the player (measured:
@@ -2904,12 +2905,34 @@ class JaxJamesBond(
                 ),
             ),
         )
-        air_used = air_hit | debris_hit
-        water_used = water_hit | sub_hit
+        torp_hit = jnp.logical_and(
+            in_water_b & (state.player_bullet_active | state.player_wbullet_active),
+            jnp.logical_and(
+                state.sub_torp_active,
+                jnp.logical_or(
+                    _aabb_overlap(
+                        state.player_wbullet_x, state.player_wbullet_y,
+                        self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                        state.sub_torp_x, state.sub_torp_y,
+                        self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT,
+                    ),
+                    _aabb_overlap(
+                        state.player_bullet_x, state.player_bullet_y,
+                        self.consts.BULLET_WIDTH, self.consts.BULLET_HEIGHT,
+                        state.sub_torp_x, state.sub_torp_y,
+                        self.consts.SUB_SHOT_WIDTH, self.consts.SUB_SHOT_HEIGHT,
+                    )
+                )
+            )
+        )
+
+        air_used = air_hit | debris_hit | torp_hit
+        water_used = water_hit | sub_hit | torp_hit
         gained = (
             rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET
             + debris_hit.astype(jnp.int32) * self.consts.SCORE_DEBRIS_SHOT
             + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
+            + torp_hit.astype(jnp.int32) * self.consts.SCORE_TORPEDO_SHOT
         )
 
         def park(keep, v):
@@ -2922,6 +2945,7 @@ class JaxJamesBond(
             rocket_active=state.rocket_active & (~rocket_hit),
             wb_flyer_active=state.wb_flyer_active & (~debris_hit),
             submarine_active=state.submarine_active & (~sub_hit),
+            sub_torp_active=state.sub_torp_active & (~torp_hit),
             player_bullet_active=air_keep,
             player_bullet_step=park(air_keep, state.player_bullet_step),
             player_bullet_x=park(air_keep, state.player_bullet_x),
