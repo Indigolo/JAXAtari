@@ -2999,7 +2999,7 @@ class JaxJamesBond(
         ## current scrolled position, not where it was last drawn. This also
         ## catches a fast descent that crosses the top between two frames.
         over_deck = (
-            (state.player_x + self.consts.PLAYER_COLLISION_WIDTH > state.oil_rig_x)
+            (state.player_x + self.consts.PLAYER_COLLISION_WIDTH > (state.oil_rig_x + self.consts.OIL_RIG_WIDTH / 2)) ## Has to land on the top-right of the oil rig (the platform)
             & (state.player_x < state.oil_rig_x + self.consts.OIL_RIG_WIDTH)
         )
         crossing_top = (
