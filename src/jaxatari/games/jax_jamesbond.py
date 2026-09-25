@@ -404,7 +404,7 @@ class JamesBondConstants(struct.PyTreeNode):
     SUB_SHOT_HEIGHT: int = struct.field(pytree_node=False, default=8)
 
     ## The depth charge sinks the submarine (longplay: +200 each time)
-    SCORE_SUBMARINE_SHOT: int = struct.field(pytree_node=False, default=200)
+    SCORE_SUBMARINE: int = struct.field(pytree_node=False, default=200)
     SCORE_TORPEDO_SHOT: int = struct.field(pytree_node=False, default=100)
 
     ## Water scene: the satellite stops using the kitchen timer and instead
@@ -594,7 +594,7 @@ class JaxJamesBond(
         if consts is None:
             ## JB_START_STAGE lets playtesters jump straight into a later
             ## scene through scripts/play.py without touching code
-            start_stage = int(os.environ.get("JB_START_STAGE", "1"))
+            start_stage = int(os.environ.get("JB_START_STAGE", "0"))
             consts = JamesBondConstants(START_STAGE=min(max(start_stage, 0), 2))
         super().__init__(consts)
         self.renderer = JamesBondRenderer(self.consts)
@@ -2964,7 +2964,7 @@ class JaxJamesBond(
         gained = (
             rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET
             + debris_hit.astype(jnp.int32) * self.consts.SCORE_DEBRIS_SHOT
-            + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE_SHOT
+            + sub_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE
             + torp_hit.astype(jnp.int32) * self.consts.SCORE_TORPEDO_SHOT
         )
 
@@ -3118,7 +3118,7 @@ class JaxJamesBond(
         took_damage = jnp.logical_and(any_hit, can_take_damage)
 
         return state.replace(
-            score=state.score + rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET,
+            score=state.score + rocket_hit.astype(jnp.int32) * self.consts.SCORE_ROCKET + submarine_hit.astype(jnp.int32) * self.consts.SCORE_SUBMARINE,
             rocket_active=jnp.logical_and(state.rocket_active, ~rocket_hit),
             sub_torp_active=jnp.logical_and(state.sub_torp_active, ~shot_hit),
             lives=jnp.maximum(
