@@ -3064,7 +3064,7 @@ class JaxJamesBond(
             ),
             oil_rig_landing_timer=jnp.where(side_hit, 0, state.oil_rig_landing_timer),
             oil_rig_active=state.oil_rig_active & ~side_hit,
-            oil_rig_visible=state.oil_rig_visible & ~side_hit,
+            oil_rig_visible=state.oil_rig_visible | side_hit,
             scuba_seen=jnp.where(
                 took_damage,
                 False,
