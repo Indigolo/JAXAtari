@@ -356,7 +356,7 @@ class JamesBondConstants(struct.PyTreeNode):
     ROCKET_RESPAWN_FRAMES: int = struct.field(pytree_node=False, default=171) ## 256 frame cycle minus ~85 frames of life
     DEBRIS_LIFETIME_FRAMES: int = struct.field(pytree_node=False, default=120)
     ROCKET_INITIAL_SPAWN_DELAY: int = struct.field(pytree_node=False, default=300) ## First rocket pass is delayed 300 frames after entering stage 2
-    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=8) ## rocket remains in the gray burst flash for about 0.27 seconds
+    SKY_FLASH_FRAMES: int = struct.field(pytree_node=False, default=30) ## rocket remains in the gray burst flash for about 0.27 seconds
     SUBMARINE_WIDTH: int = struct.field(pytree_node=False, default=16)
     SUBMARINE_HEIGHT: int = struct.field(pytree_node=False, default=11)
     SUBMARINE_Y: int = struct.field(pytree_node=False, default=135) ## deep under the surface
@@ -2146,11 +2146,13 @@ class JaxJamesBond(
         rocket_explodes = in_water_b & state.rocket_active & (
             next_rocket_y <= self.consts.ROCKET_EXPLODE_Y
         )
-        player_hit_from_explosion = rocket_explodes & (state.player_y <= self.consts.PLAYER_INIT_Y)
         next_rocket_active = state.rocket_active & (~rocket_explodes) & (
             next_rocket_x > self.consts.GAME_AREA_MIN_X - self.consts.ROCKET_WIDTH
         )
         sky_flash_timer = jnp.where(rocket_explodes, self.consts.SKY_FLASH_FRAMES, state.sky_flash_timer)
+
+        player_hit_from_explosion = ((state.stage == 2) & (sky_flash_timer > 0)) & (state.player_y <= self.consts.PLAYER_INIT_Y)
+        
         ## Submarine (longplay): enters from the LEFT and cruises right,
         ## 2px every 3 frames
         sub_dx = jnp.where(state.step_count % 3 != 0, 1, 0)
@@ -2470,7 +2472,7 @@ class JaxJamesBond(
             ## Charge one life on that event, if player is not underwater.
             ## and cooldown so neither the flash nor a simultaneous hit can
             ## charge another life. Shooting it earlier prevents the burst.
-            lives = jnp.maximum(state.lives - player_hit_from_explosion.astype(jnp.int32), 0),
+            lives=jnp.maximum(state.lives - player_hit_from_explosion.astype(jnp.int32), 0),
             hit_cooldown=jnp.where(player_hit_from_explosion, self.consts.HIT_COOLDOWN_STEPS, state.hit_cooldown),
             death_timer=jnp.where(player_hit_from_explosion, self.consts.DEATH_ANIMATION_FRAMES, state.death_timer),
             diamond_y=next_diamond_y,
